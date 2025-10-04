@@ -1,0 +1,1 @@
+MERN Job Board v2 — candidate filters, FAQs, notifications, employer management. See server/.env.sample for config.
