@@ -63,19 +63,44 @@ export const downloadResume = async (req, res) => {
   const app = await Application.findById(id).populate('job candidate');
   if (!app) return res.status(404).json({ error: 'Application not found' });
   if (app.job.employer.toString() !== req.user._id.toString()) return res.status(403).json({ error: 'Forbidden' });
-  if (!app.resumeFileName) return res.status(404).json({ error: 'No resume' });
 
-  const p1 = path.resolve('server','uploads','resumes',app.resumeFileName);
-  const p2 = path.resolve('uploads','resumes',app.resumeFileName);
-  const pathToSend = fs.existsSync(p1) ? p1 : p2;
-  if (!fs.existsSync(pathToSend)) return res.status(404).json({ error: 'Resume file missing' });
-
-  if (app.status === 'submitted') {
-    app.status = 'reviewed'; await app.save();
+  const markReviewedIfNeeded = async () => {
+    if (app.status !== 'submitted') return;
+    app.status = 'reviewed';
+    await app.save();
     try {
       await notify({ user: app.candidate._id, title:'Application under review', message:`Employer viewed your resume for ${app.job.title}.`, link:`/jobs/${app.job._id}`, type:'status' });
       await sendEmail({ to: app.email, subject:`Your application is under review`, html:`<p>Your application to <strong>${app.job.title}</strong> is under review.</p>` });
     } catch {}
+  };
+
+  const safeName = (app.candidate?.name || 'resume').replace(/[^\w.-]+/g, '_');
+
+  const fileCandidates = app.resumeFileName ? [
+    path.resolve('uploads', 'resumes', app.resumeFileName),
+    path.resolve('server', 'uploads', 'resumes', app.resumeFileName)
+  ] : [];
+
+  let filePath = fileCandidates.find(fs.existsSync);
+
+  if (!filePath && app.resumePublicPath) {
+    if (/^https?:\/\//i.test(app.resumePublicPath)) {
+      await markReviewedIfNeeded();
+        return res.json({ url: app.resumePublicPath });
+    }
+    const normalized = app.resumePublicPath.startsWith('/') ? app.resumePublicPath.slice(1) : app.resumePublicPath;
+    const staticCandidates = [
+      path.resolve(normalized),
+      path.resolve('server', normalized)
+    ];
+    filePath = staticCandidates.find(fs.existsSync);
   }
-  res.download(pathToSend, `${app.candidate.name||'resume'}.pdf`);
+
+  if (!filePath) return res.status(404).json({ error: 'Resume file not found' });
+
+  await markReviewedIfNeeded();
+
+  const ext = path.extname(filePath) || '.pdf';
+  return res.download(filePath, `${safeName}${ext}`);
 };
+

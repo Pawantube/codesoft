@@ -1,5 +1,6 @@
 import { Route, Routes, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import InstallPromptBanner from './components/InstallPromptBanner';
 import Home from './pages/Home';
 import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
@@ -22,30 +23,34 @@ function Protected({ role, children }) {
   return children;
 }
 
-export default function App(){
-  return(<AuthProvider>
-    <div className="min-h-screen flex flex-col">
-      <Navbar/>
-      <main className="container py-6 flex-1">
-        <Routes>
-          <Route path="/" element={<Home/>}/>
-          <Route path="/jobs" element={<Jobs/>}/>
-          <Route path="/jobs/:id" element={<JobDetail/>}/>
-          <Route path="/login" element={<Login/>}/>
-          <Route path="/register" element={<Register/>}/>
-          <Route path="/employer" element={<Protected role="employer"><EmployerDashboard/></Protected>}/>
-          <Route path="/employer/post" element={<Protected role="employer"><PostJob/></Protected>}/>
-          <Route path="/employer/manage/:id" element={<Protected role="employer"><EmployerManageJob/></Protected>}/>
-          <Route path="/candidate" element={<Protected role="candidate"><CandidateDashboard/></Protected>}/>
-          <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
-<Route path="/profile" element={<Protected><Profile /></Protected>} />
-<Route path="/employer/jobs" element={<Protected role="employer"><EmployerJobs /></Protected>} />
-<Route path="/employer/edit/:id" element={<Protected role="employer"><EditJob /></Protected>} />
-		  <Route path="*" element={<Navigate to="/"/>}/>
+export default function App() {
+  const year = new Date().getFullYear();
 
-        </Routes>
-      </main>
-      <footer className="text-center text-sm text-gray-500 py-6">Â© {new Date().getFullYear()} JobBoard</footer>
-    </div>
-  </AuthProvider>);
+  return (
+    <AuthProvider>
+      <div className="min-h-screen bg-gray-50 text-gray-900">
+        <Navbar />
+        <main className="mx-auto flex w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/jobs" element={<Jobs />} />
+            <Route path="/jobs/:id" element={<JobDetail />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/employer" element={<Protected role="employer"><EmployerDashboard /></Protected>} />
+            <Route path="/employer/post" element={<Protected role="employer"><PostJob /></Protected>} />
+            <Route path="/employer/manage/:id" element={<Protected role="employer"><EmployerManageJob /></Protected>} />
+            <Route path="/candidate" element={<Protected role="candidate"><CandidateDashboard /></Protected>} />
+            <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
+            <Route path="/profile" element={<Protected><Profile /></Protected>} />
+            <Route path="/employer/jobs" element={<Protected role="employer"><EmployerJobs /></Protected>} />
+            <Route path="/employer/edit/:id" element={<Protected role="employer"><EditJob /></Protected>} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+        <footer className="py-6 text-center text-sm text-gray-500">© {year} SawConnect Job Board</footer>
+        <InstallPromptBanner />
+      </div>
+    </AuthProvider>
+  );
 }
