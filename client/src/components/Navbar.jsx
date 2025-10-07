@@ -13,7 +13,6 @@ export default function Navbar() {
   }, [location.pathname]);
 
   const toggleMobile = () => setMobileOpen((prev) => !prev);
-
   const menuButtonLabel = mobileOpen ? 'Close menu' : 'Open menu';
 
   const renderAuthLinks = (className = '') => {
@@ -68,6 +67,7 @@ export default function Navbar() {
 
         <div className="hidden md:flex items-center gap-4 text-sm">
           <Link to="/jobs" className="hover:text-gray-900 text-gray-700">Jobs</Link>
+          <Link to="/discover" className="hover:text-gray-900 text-gray-700">Discover</Link>`r`n          <Link to="/channels" className="hover:text-gray-900 text-gray-700">Channels</Link>
           {user?.role === 'employer' && <Link to="/employer" className="hover:text-gray-900 text-gray-700">Dashboard</Link>}
           {user?.role === 'candidate' && <Link to="/candidate" className="hover:text-gray-900 text-gray-700">Dashboard</Link>}
           {user && <Link to="/profile" className="hover:text-gray-900 text-gray-700">Profile</Link>}
@@ -86,6 +86,12 @@ export default function Navbar() {
           <div className="px-4 py-4 flex flex-col gap-3 text-sm">
             <Link to="/jobs" onClick={() => setMobileOpen(false)} className="py-1">
               Jobs
+            </Link>
+            <Link to="/discover" onClick={() => setMobileOpen(false)} className="py-1">
+              Discover
+            </Link>
+            <Link to="/channels" onClick={() => setMobileOpen(false)} className="py-1">
+              Channels
             </Link>
             {user?.role === 'employer' && (
               <Link to="/employer" onClick={() => setMobileOpen(false)} className="py-1">
@@ -125,3 +131,4 @@ export default function Navbar() {
     </nav>
   );
 }
+
