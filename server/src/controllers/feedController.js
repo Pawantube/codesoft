@@ -1,5 +1,6 @@
 import User from '../models/User.js';
 import VideoInteraction from '../models/VideoInteraction.js';
+import Notification from '../models/Notification.js';
 
 const actionMetricMap = {
   view: 'videoMetrics.views',
@@ -153,10 +154,60 @@ export const recordVideoInteraction = async (req, res) => {
     await User.updateOne({ _id: candidate._id }, { $inc: inc });
   }
 
+  // Notify candidate on like
+  if (action === 'like') {
+    try {
+      const note = await Notification.create({
+        user: candidate._id,
+        title: 'Someone is interested',
+        message: `${req.user.name || 'An employer'} liked your intro video`,
+        link: `/chat`,
+        type: 'engagement',
+      });
+      req.io?.to?.(`user:${String(candidate._id)}`)?.emit?.('notify:new', {
+        id: String(note._id),
+        title: note.title,
+        message: note.message,
+        link: note.link,
+        createdAt: note.createdAt,
+      });
+    } catch {}
+  }
+
   res.json({
     candidateId: String(candidate._id),
     action: interaction.action,
     score: interaction.score,
     watchSeconds: interaction.watchSeconds,
   });
+};
+
+export const listInterested = async (req, res) => {
+  const likes = await VideoInteraction.find({ viewer: req.user._id, action: 'like' })
+    .sort({ updatedAt: -1 })
+    .lean();
+  const ids = likes.map((l) => l.candidate);
+  if (!ids.length) return res.json([]);
+  const users = await User.find({ _id: { $in: ids } })
+    .select('name headline location avatarUrl videoUrl videoTags companyName')
+    .lean();
+  const map = new Map(users.map((u) => [String(u._id), u]));
+  const result = likes
+    .map((l) => {
+      const u = map.get(String(l.candidate));
+      if (!u) return null;
+      return {
+        id: String(u._id),
+        name: u.name,
+        headline: u.headline,
+        location: u.location,
+        avatarUrl: u.avatarUrl,
+        videoUrl: u.videoUrl,
+        videoTags: u.videoTags || [],
+        companyName: u.companyName,
+        likedAt: l.updatedAt,
+      };
+    })
+    .filter(Boolean);
+  res.json(result);
 };

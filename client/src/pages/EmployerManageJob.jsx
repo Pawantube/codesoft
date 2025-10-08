@@ -9,6 +9,7 @@ export default function EmployerManageJob() {
 
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [invites, setInvites] = useState({}); // appId -> { at, notes, sending }
 
   const load = async () => {
     setLoading(true);
@@ -20,69 +21,41 @@ export default function EmployerManageJob() {
     }
   };
 
-  useEffect(() => {
-    load().catch(() => {});
-  }, [id]);
-
-  const download = async (application) => {
-    const token = api.defaults.headers.common['Authorization'];
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-    const requestUrl = `${baseUrl}/api/applications/${application._id}/resume`;
-
-    try {
-      const response = await fetch(requestUrl, {
-        headers: token ? { Authorization: token } : {},
-        credentials: 'include',
-      });
-
-      if (response.status === 200) {
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await response.json();
-          if (data?.url) {
-            window.open(data.url, '_blank', 'noopener');
-            await load();
-            return;
-          }
-        }
-      }
-
-      if (!response.ok) {
-        let message = 'Resume not available';
-        try {
-          const data = await response.json();
-          if (data?.error) message = data.error;
-        } catch {}
-        alert(message);
-        return;
-      }
-
-      const blob = await response.blob();
-      const downloadLink = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      const rawName = application.candidate?.name || application.name || 'resume';
-      const safeName = rawName.replace(/[^\w.-]+/g, '_');
-      const ext =
-        application.resumeFileName && application.resumeFileName.includes('.')
-          ? `.${application.resumeFileName.split('.').pop()}`
-          : '.pdf';
-
-      downloadLink.href = objectUrl;
-      downloadLink.download = `${safeName}${ext}`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      downloadLink.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-      await load();
-    } catch (error) {
-      console.error(error);
-      alert('Download failed. Please try again.');
-    }
-  };
-
   const setStatus = async (appId, status) => {
     await api.patch(`/applications/${appId}/status`, { status });
     await load();
+  };
+
+  const setInviteField = (appId, key, value) => {
+    setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), [key]: value } }));
+  };
+
+  const scheduleInvite = async (appId) => {
+    const cur = invites[appId] || {};
+    if (!cur.at) { alert('Select date & time'); return; }
+    setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), sending: true } }));
+    try {
+      await api.post(`/applications/${appId}/invite`, { at: cur.at, notes: cur.notes||'' });
+      await load();
+      alert('Interview scheduled');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to schedule');
+    } finally {
+      setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), sending: false } }));
+    }
+  };
+
+  const updateInvite = async (appId, patch) => {
+    setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), sending: true } }));
+    try {
+      await api.patch(`/applications/${appId}/invite`, patch);
+      await load();
+      alert('Interview updated');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Update failed');
+    } finally {
+      setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), sending: false } }));
+    }
   };
 
   // --- NEW: create/open chat with candidate tied to this application

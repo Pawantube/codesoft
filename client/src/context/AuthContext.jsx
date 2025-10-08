@@ -18,11 +18,24 @@ export default function AuthProvider({ children }) {
       api
         .get('/users/me')
         .then((res) => setUser(res.data))
-        .catch(() => {
-          localStorage.removeItem('token');
-          setAuthToken(null);
-          setToken('');
-          setUser(null);
+        .catch((err) => {
+          const status = err?.response?.status;
+          // Only clear session on authentication errors
+          if (status === 401 || status === 403) {
+            localStorage.removeItem('token');
+            setAuthToken(null);
+            setToken('');
+            setUser(null);
+          } else {
+            // Keep the user logged in; schedule a light retry
+            console.warn('Transient /users/me error retained session', status);
+            setTimeout(() => {
+              api
+                .get('/users/me')
+                .then((res) => setUser(res.data))
+                .catch(() => {});
+            }, 15000);
+          }
         });
     } else {
       setAuthToken(null);
@@ -75,8 +88,9 @@ export default function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, token, login, register, logout }}>
+    <AuthCtx.Provider value={{ user, token, login, register, logout, setUser }}>
       {children}
     </AuthCtx.Provider>
   );
 }
+

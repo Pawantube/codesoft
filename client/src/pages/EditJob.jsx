@@ -81,22 +81,31 @@ export default function EditJob() {
 
       <label className="flex gap-2 text-sm">
         <input type="checkbox" checked={!!form.featured}
-               onChange={e=>setForm({...form, featured:e.target.checked})}/>
+               onChange={e=>setForm({...form, featured:e.target.checked})} />
         Featured
       </label>
 
       <div className="space-y-2">
         <div className="font-semibold">Company FAQs</div>
-        {form.faqs.map((f,i)=>(
+        {(Array.isArray(form.faqs) ? form.faqs : []).map((f,i)=>(
           <div key={i} className="grid sm:grid-cols-2 gap-2">
-            <input className="border rounded px-3 py-2" placeholder="Question" value={f.q||''}
-                   onChange={e=>setFAQ(i,'q',e.target.value)}/>
-            <input className="border rounded px-3 py-2" placeholder="Answer" value={f.a||''}
+            <input
+              className="border rounded px-3 py-2"
+              placeholder="Question"
+              value={(f?.q||'')}
+              onChange={e=>setFAQ(i,'q',e.target.value)}
+            />
+            <input className="border rounded px-3 py-2" placeholder="Answer" value={(f?.a||'')}
                    onChange={e=>setFAQ(i,'a',e.target.value)}/>
           </div>
         ))}
-        <button type="button" className="text-sm underline"
-                onClick={()=>setForm({...form, faqs:[...form.faqs, {q:'',a:''}]})}>Add FAQ</button>
+        <button
+          type="button"
+          className="text-sm underline"
+          onClick={()=>setForm({...form, faqs:[...(Array.isArray(form.faqs)?form.faqs:[]), {q:'',a:''}]})}
+        >
+          Add FAQ
+        </button>
       </div>
 
       <button className="px-4 py-2 rounded bg-gray-900 text-white">Save</button>

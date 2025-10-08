@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { initSocket, getSocket } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
-
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
 const formatDate = (value) => {
   if (!value) return '';
   try {
@@ -26,11 +24,14 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [text, setText] = useState('');
-
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const searchTimeoutRef = useRef();
+
+  const [searchRoleFilter, setSearchRoleFilter] = useState('all'); // all | candidate | employer | team
+  const [searchJobFilter, setSearchJobFilter] = useState('');
+  const [sendingCall, setSendingCall] = useState(false);
 
   const bottomRef = useRef(null);
   const initialConversationRef = useRef(new URLSearchParams(location.search).get('c'));
@@ -235,9 +236,32 @@ export default function ChatPage() {
     }
   };
 
-  if (!user) {
-    return <div className="p-6 text-sm text-gray-600">Login required to use chat.</div>;
-  }
+  // Send a call link in the current conversation and copy it (component scope)
+  const startCall = async () => {
+    if (!activeConversationId || !token || sendingCall) return;
+    setSendingCall(true);
+    const appId = activeConversation?.applicationId;
+    if (!appId) {
+      alert('This conversation is not linked to an application.');
+      setSendingCall(false);
+      return;
+    }
+    const callUrl = `${window.location.origin}/call/${appId}`;
+    const msg = `Join video call: ${callUrl}`;
+    try {
+      await fetch(`${API_URL}/api/chat/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversationId: activeConversationId, body: msg })
+      });
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(callUrl);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to start call');
+    } finally { setSendingCall(false); }
+  };
 
   return (
     <div className="grid gap-4 p-4 lg:grid-cols-12">
@@ -245,18 +269,50 @@ export default function ChatPage() {
         <div className="rounded-xl border bg-white">
           <div className="border-b p-3 font-semibold">Find people</div>
           <div className="space-y-2 p-3">
+            {user?.role === 'employer' && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-2 text-[12px] text-blue-800">
+                You can search candidates from your job applications by name or email. Results only include candidates who applied to your jobs.
+              </div>
+            )}
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by name or email"
               className="w-full rounded-lg border px-3 py-2 text-sm"
             />
+            <div className="flex gap-2 text-xs">
+              <select
+                value={searchRoleFilter}
+                onChange={(e) => setSearchRoleFilter(e.target.value)}
+                className="rounded border px-2 py-1"
+              >
+                <option value="all">All</option>
+                <option value="candidate">Candidates</option>
+                <option value="employer">Employers</option>
+                <option value="team">Team</option>
+              </select>
+              <input
+                value={searchJobFilter}
+                onChange={(e) => setSearchJobFilter(e.target.value)}
+                className="flex-1 rounded border px-2 py-1"
+                placeholder="Filter by job title/company"
+              />
+            </div>
             {searching && <div className="text-xs text-gray-500">Searching...</div>}
             {!searching && searchTerm.trim().length >= 2 && searchResults.length === 0 && (
               <div className="text-xs text-gray-500">No matching contacts.</div>
             )}
             <div className="max-h-56 space-y-2 overflow-auto">
-              {searchResults.map((contact) => (
+              {searchResults
+                .filter((c) => searchRoleFilter === 'all' || c.relation === searchRoleFilter)
+                .filter((c) => {
+                  const f = searchJobFilter.trim().toLowerCase();
+                  if (!f) return true;
+                  const title = (c.job?.title || '').toLowerCase();
+                  const company = (c.job?.company || '').toLowerCase();
+                  return title.includes(f) || company.includes(f);
+                })
+                .map((contact) => (
                 <button
                   key={`${contact.userId}-${contact.applicationId}`}
                   onClick={() => startConversation(contact)}
@@ -323,6 +379,19 @@ export default function ChatPage() {
                   {activeConversation.job.title} - {activeConversation.job.company}
                 </div>
               )}
+              <div className="mt-2 flex gap-2">
+                <button onClick={startCall} disabled={sendingCall} className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${sendingCall ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600'}`}>
+                  {sendingCall ? 'Sending…' : 'Start Video Call'}
+                </button>
+                <a
+                  href={`/call/${activeConversation?.applicationId || ''}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border px-3 py-1.5 text-xs"
+                >
+                  Open Call
+                </a>
+              </div>
             </div>
           ) : (
             <div className="text-sm text-gray-500">Select a conversation to start messaging.</div>

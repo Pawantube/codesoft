@@ -58,16 +58,18 @@ export const listChannels = async (req, res) => {
 };
 
 export const createChannel = async (req, res) => {
-  const { name, description, visibility = 'public', tags = [], company } = req.body;
+  const { name, description, visibility = 'public', tags = [], company, joinKey } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Channel name is required' });
 
   const slug = await buildSlug(name);
   const channel = await Channel.create({
     name: name.trim(),
+    slug,
     description: description?.trim(),
     visibility,
     tags: Array.isArray(tags) ? tags : String(tags || '').split(',').map((t) => t.trim()).filter(Boolean),
     company: company || null,
+    joinKey: visibility === 'private' && joinKey ? String(joinKey) : undefined,
     owner: req.user._id,
     members: [{ user: req.user._id, role: 'owner' }],
   });
@@ -90,11 +92,26 @@ const ensureMember = (channel, userId) =>
 
 export const joinChannel = async (req, res) => {
   const { id } = req.params;
-  const channel = await Channel.findById(id);
+  const channel = await Channel.findById(id).select('+joinKey');
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
   if (ensureMember(channel, req.user._id)) {
     return res.json({ ok: true, role: ensureMember(channel, req.user._id).role });
+  }
+
+  // Access control
+  if (channel.visibility === 'private') {
+    const key = req.body?.key || req.query?.key;
+    if (!channel.joinKey || key !== channel.joinKey) {
+      return res.status(403).json({ error: 'Join key required for private channel' });
+    }
+  }
+  if (channel.visibility === 'company') {
+    const isEmployerOrTeam = ['employer', 'team'].includes(req.user.role);
+    const sameCompany = channel.company && req.user.companyName && channel.company === req.user.companyName;
+    if (!isEmployerOrTeam && !sameCompany) {
+      return res.status(403).json({ error: 'Company members only' });
+    }
   }
 
   channel.members.push({ user: req.user._id, role: 'member' });

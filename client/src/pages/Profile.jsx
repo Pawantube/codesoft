@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import AvatarUploader from '../components/AvatarUploader';
 
 const toListString = (value) => {
   if (!value) return '';
@@ -40,6 +41,7 @@ export default function Profile() {
         skills: toListString(data.skills),
         interests: toListString(data.interests),
         videoTags: toListString(data.videoTags),
+        // duration no longer user-editable; keep if backend sends for display only
         videoDuration: data.videoDuration ?? '',
         videoStatus: data.videoStatus || 'draft',
         videoUrl: data.videoUrl || '',
@@ -80,7 +82,6 @@ export default function Profile() {
         resumeUrl: form.resumeUrl,
         links: form.links,
         videoTags: form.videoTags,
-        videoDuration: form.videoDuration,
       });
       alert('Profile updated');
     } catch (error) {
@@ -101,7 +102,6 @@ export default function Profile() {
       const formData = new FormData();
       formData.append('video', videoFile);
       if (form.videoTags) formData.append('tags', form.videoTags);
-      if (form.videoDuration) formData.append('duration', form.videoDuration);
 
       const res = await api.post('/users/me/video', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -127,6 +127,13 @@ export default function Profile() {
   return (
     <form onSubmit={saveProfile} className="mx-auto grid max-w-3xl gap-4 rounded-xl border bg-white p-6">
       <h1 className="text-xl font-semibold">My Profile</h1>
+
+      <section className="rounded-xl border p-4">
+        <h2 className="text-sm font-semibold">Profile Photo</h2>
+        <div className="mt-2">
+          <AvatarUploader />
+        </div>
+      </section>
 
       <input
         className="rounded border px-3 py-2"
@@ -228,7 +235,7 @@ export default function Profile() {
         <section className="mt-4 rounded-xl border p-4">
           <h2 className="text-lg font-semibold">Video Introduction</h2>
           <p className="text-sm text-gray-600">
-            Upload a 30–60 second introduction. Highlight your experience, skills, and what you are looking for next.
+            Upload a short introduction video. Highlight your experience, skills, and what you are looking for next.
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <input
@@ -236,12 +243,6 @@ export default function Profile() {
               placeholder="Video tags (comma separated)"
               value={form.videoTags}
               onChange={(e) => handleChange('videoTags', e.target.value)}
-            />
-            <input
-              className="rounded border px-3 py-2"
-              placeholder="Duration in seconds"
-              value={form.videoDuration}
-              onChange={(e) => handleChange('videoDuration', e.target.value.replace(/[^0-9.]/g, ''))}
             />
           </div>
           <div className="mt-3 text-sm text-gray-600">
@@ -267,7 +268,7 @@ export default function Profile() {
               onClick={uploadVideo}
               className="w-full rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
             >
-              {uploadingVideo ? 'Uploading…' : 'Upload video'}
+              {uploadingVideo ? 'Uploadingï¿½' : 'Upload video'}
             </button>
           </div>
         </section>
@@ -278,7 +279,7 @@ export default function Profile() {
         disabled={saving}
         className="mt-4 rounded bg-gray-900 px-4 py-2 text-white disabled:opacity-50"
       >
-        {saving ? 'Saving…' : 'Save changes'}
+        {saving ? 'Savingï¿½' : 'Save changes'}
       </button>
     </form>
   );

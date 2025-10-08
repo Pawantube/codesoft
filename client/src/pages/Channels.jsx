@@ -21,8 +21,17 @@ export default function Channels() {
   const [creating, setCreating] = useState(false);
   const [newChannel, setNewChannel] = useState(defaultChannelPayload);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
   const bottomRef = useRef(null);
   const joinedRef = useRef(false);
+  const typingTimeoutRef = useRef(null);
+  const [typingUsers, setTypingUsers] = useState([]); // display names typing in current channel
+  const [lastSeen, setLastSeen] = useState(() => {
+    try {
+      const raw = localStorage.getItem('channels:lastSeen');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
 
   const selectedChannel = useMemo(
     () => channels.find((channel) => channel.id === selectedId) || null,
@@ -33,9 +42,10 @@ export default function Channels() {
     setLoadingChannels(true);
     try {
       const res = await api.get('/channels');
-      setChannels(res.data || []);
-      if (!selectedId && res.data?.length) {
-        setSelectedId(res.data[0].id);
+      const list = res.data || [];
+      setChannels(list);
+      if (!selectedId && list.length) {
+        setSelectedId(list[0].id);
       }
     } catch (err) {
       console.error(err);
@@ -60,7 +70,19 @@ export default function Channels() {
         )
       );
     } catch (err) {
-      throw new Error(err?.response?.data?.error || 'Unable to join channel');
+      const msg = err?.response?.data?.error || 'Unable to join channel';
+      // If key required, prompt once
+      if (/Join key/i.test(msg)) {
+        const key = window.prompt('This channel is private. Enter join key:');
+        if (key) {
+          const res = await api.post(`/channels/${channelId}/join?key=${encodeURIComponent(key)}`);
+          if (res.data?.ok) {
+            setChannels((prev) => prev.map((ch) => ch.id === channelId ? { ...ch, isMember: true, memberRole: res.data.role || 'member' } : ch));
+            return;
+          }
+        }
+      }
+      throw new Error(msg);
     }
   };
 
@@ -83,11 +105,47 @@ export default function Channels() {
     if (!socket) return;
 
     const handleMessage = (payload) => {
-      setMessages((prev) => [...prev, payload]);
+      setMessages((prev) => {
+        const exists = prev.some((m) => m.id === payload.id);
+        return exists ? prev : [...prev, payload];
+      });
+      // Update lastMessageAt for unread badge
+      setChannels((prev) => prev.map((ch) => ch.id === payload.channelId ? { ...ch, lastMessageAt: payload.createdAt } : ch));
+    };
+    const handleError = ({ channelId, error }) => {
+      setError(error || 'Channel error');
+    };
+    const handleConnect = () => {
+      if (selectedId) {
+        socket.emit('channel:join', { channelId: selectedId });
+      }
+    };
+    const handleTyping = ({ channelId, user: from }) => {
+      if (!channelId || channelId !== selectedId) return;
+      if (String(from?._id) === String(user?._id)) return; // ignore self
+      const name = from?.name || 'Someone';
+      setTypingUsers((prev) => {
+        const set = new Set(prev);
+        set.add(name);
+        return Array.from(set);
+      });
+      // Clear after 3s of inactivity
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = window.setTimeout(() => setTypingUsers([]), 3000);
     };
 
     socket.on('channel:new-message', handleMessage);
-    return () => socket.off('channel:new-message', handleMessage);
+    socket.on('channel:error', handleError);
+    socket.on('connect', handleConnect);
+    socket.on('reconnect', handleConnect);
+    socket.on('channel:typing', handleTyping);
+    return () => {
+      socket.off('channel:new-message', handleMessage);
+      socket.off('channel:error', handleError);
+      socket.off('connect', handleConnect);
+      socket.off('reconnect', handleConnect);
+      socket.off('channel:typing', handleTyping);
+    };
   }, []);
 
   useEffect(() => {
@@ -109,6 +167,7 @@ export default function Channels() {
       getSocket()?.emit('channel:leave', { channelId: selectedId });
       setMessages([]);
       joinedRef.current = false;
+      setTypingUsers([]);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
@@ -123,12 +182,37 @@ export default function Channels() {
     setMessageBody('');
     try {
       const res = await api.post(`/channels/${selectedChannel.id}/messages`, { body });
-      setMessages((prev) => [...prev, res.data]);
+      setMessages((prev) => {
+        const exists = prev.some((m) => m.id === res.data.id);
+        return exists ? prev : [...prev, res.data];
+      });
+      // Touch lastMessageAt
+      setChannels((prev) => prev.map((ch) => ch.id === selectedChannel.id ? { ...ch, lastMessageAt: res.data.createdAt } : ch));
     } catch (err) {
       console.error(err);
       setError(err?.response?.data?.error || 'Unable to send message');
     }
   };
+
+  // Emit typing event as user types
+  const onType = (val) => {
+    setMessageBody(val);
+    const socket = getSocket();
+    if (socket && selectedChannel) {
+      socket.emit('channel:typing', { channelId: selectedChannel.id });
+    }
+  };
+
+  // Persist last seen and compute unread badge
+  useEffect(() => {
+    if (!selectedId) return;
+    const now = new Date().toISOString();
+    setLastSeen((prev) => {
+      const next = { ...prev, [selectedId]: now };
+      try { localStorage.setItem('channels:lastSeen', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [selectedId, messages.length]);
 
   const createChannel = async (event) => {
     event.preventDefault();
@@ -240,12 +324,29 @@ export default function Channels() {
             </button>
           </div>
 
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search channels"
+            className="w-full rounded-lg border px-3 py-2 text-sm"
+          />
+
           {loadingChannels && (
             <div className="text-xs text-gray-500">Loading channels…</div>
           )}
 
           <div className="space-y-2">
-            {channels.map((channel) => (
+            {channels
+              .filter((c) => {
+                const q = query.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  c.name.toLowerCase().includes(q) ||
+                  (c.description || '').toLowerCase().includes(q) ||
+                  (c.tags || []).join(',').toLowerCase().includes(q)
+                );
+              })
+              .map((channel) => (
               <button
                 key={channel.id}
                 onClick={() => setSelectedId(channel.id)}
@@ -287,6 +388,7 @@ export default function Channels() {
                     {selectedChannel.description || 'No description provided.'}
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
                 {selectedChannel.isMember && selectedChannel.memberRole !== 'owner' && (
                   <button
                     onClick={() => leaveChannel(selectedChannel.id)}
@@ -295,6 +397,13 @@ export default function Channels() {
                     Leave
                   </button>
                 )}
+                  <button
+                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/channels?c=${selectedChannel.id}`)}
+                    className="rounded-lg border px-3 py-1 text-sm text-gray-700"
+                  >
+                    Share
+                  </button>
+                </div>
               </div>
             </header>
 
@@ -309,7 +418,7 @@ export default function Channels() {
               )}
               <div className="space-y-3">
                 {messages.map((message) => (
-                  <div key={message.id} className="rounded-lg border px-3 py-2">
+                  <div key={`${message.id}-${message.createdAt}`} className="rounded-lg border px-3 py-2">
                     <div className="text-sm font-semibold text-gray-800">
                       {message.author?.name || 'Unknown'}{' '}
                       <span className="text-xs text-gray-400">
@@ -330,7 +439,7 @@ export default function Channels() {
                 <div className="flex gap-2">
                   <textarea
                     value={messageBody}
-                    onChange={(e) => setMessageBody(e.target.value)}
+                    onChange={(e) => onType(e.target.value)}
                     rows={2}
                     className="flex-1 rounded-lg border px-3 py-2 text-sm"
                     placeholder="Share an update or ask a question…"

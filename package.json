@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "cloudinary": "^2.7.0",
+    "slugify": "^1.6.6"
+  }
+}

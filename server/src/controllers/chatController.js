@@ -1,5 +1,6 @@
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
+import Notification from '../models/Notification.js';
 import Application from '../models/Application.js';
 import Job from '../models/Job.js';
 import { canStartOrSend } from '../utils/chatPolicy.js';
@@ -195,6 +196,25 @@ export const sendMessage = async (req, res) => {
 
   req.io.to(`conv:${convo._id}`).emit('chat:new', { conversationId: String(convo._id), message: payload });
   req.io.to(`user:${recipient}`).emit('chat:poke', { conversationId: String(convo._id) });
+
+  try {
+    const note = await Notification.create({
+      user: recipient,
+      title: 'New message',
+      message: (body || '').slice(0, 140),
+      link: `/chat?c=${String(convo._id)}`,
+      type: 'application',
+    });
+    req.io.to(`user:${recipient}`).emit('notify:new', {
+      id: String(note._id),
+      title: note.title,
+      message: note.message,
+      link: note.link,
+      createdAt: note.createdAt,
+    });
+  } catch (e) {
+    // non-fatal
+  }
 
   res.status(201).json(payload);
 };

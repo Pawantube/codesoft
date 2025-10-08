@@ -137,6 +137,21 @@ export function initSocket(httpServer, { corsOrigin }) {
       socket.leave(`channel:${channelId}`);
     });
 
+    // typing indicator relay for channels
+    socket.on("channel:typing", async ({ channelId }) => {
+      try {
+        if (!channelId) return;
+        const result = await verifyChannelMember(channelId, socket.user.id);
+        if (!result.ok) return;
+        io.to(`channel:${channelId}`).except(socket.id).emit("channel:typing", {
+          channelId,
+          user: { _id: socket.user.id },
+        });
+      } catch (error) {
+        // ignore
+      }
+    });
+
     socket.on("call:join", async ({ applicationId, anonymized }) => {
       try {
         const check = await verifyCallAccess(applicationId, socket.user.id);

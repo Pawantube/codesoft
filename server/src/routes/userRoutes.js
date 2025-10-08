@@ -9,7 +9,19 @@ const router = Router();
 router.get('/me', requireAuth, me);
 router.put('/me', requireAuth, updateMe);
 
-router.post('/me/video', requireAuth, requireRole(['candidate']), uploadVideoMiddleware, uploadVideoProfile);
-router.patch('/me/video', requireAuth, requireRole(['candidate']), updateVideoProfileMeta);
+router.post(
+  '/me/video',
+  requireAuth,
+  requireRole(['candidate']),
+  uploadVideoMiddleware,     // field name: "video"
+  uploadVideoProfile
+);
+
+router.patch(
+  '/me/video',
+  requireAuth,
+  requireRole(['candidate']),
+  updateVideoProfileMeta
+);
 
 export default router;

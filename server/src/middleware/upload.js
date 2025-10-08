@@ -1,19 +1,9 @@
 // server/src/middleware/upload.js
-import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import crypto from 'crypto';
 
-const resumesDir = path.resolve('uploads', 'resumes');
-fs.mkdirSync(resumesDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, resumesDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '') || '.pdf';
-    cb(null, `${crypto.randomUUID()}${ext}`);
-  }
-});
+// Memory storage → controller decides Cloudinary upload
+const storage = multer.memoryStorage();
 
 export const uploadResume = multer({
   storage,

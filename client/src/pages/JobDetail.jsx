@@ -3,12 +3,26 @@ import { useParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
-function FAQ({faqs=[]}){
-  if(!faqs.length) return null;
-  return(<div className="bg-white rounded-xl border p-4 space-y-2">
-    <h3 className="font-semibold">Company FAQs</h3>
-    {faqs.map((f,i)=>(<details key={i} className="border rounded p-2"><summary className="font-medium">{f.q}</summary><div className="text-sm mt-1">{f.a}</div></details>))}
-  </div>);
+function FAQ({ faqs = [] }) {
+  const items = Array.isArray(faqs)
+    ? faqs.filter((x) => x && (x.q || x.question || x.title))
+    : [];
+  if (!items.length) return null;
+  return (
+    <div className="bg-white rounded-xl border p-4 space-y-2">
+      <h3 className="font-semibold">Company FAQs</h3>
+      {items.map((f, i) => {
+        const q = f.q || f.question || f.title || 'FAQ';
+        const a = f.a || f.answer || '';
+        return (
+          <details key={`${q}-${i}`} className="border rounded p-2">
+            <summary className="font-medium">{q}</summary>
+            <div className="text-sm mt-1">{a}</div>
+          </details>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function JobDetail(){

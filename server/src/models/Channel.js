@@ -15,6 +15,7 @@ const channelSchema = new mongoose.Schema(
     slug: { type: String, required: true, unique: true, lowercase: true },
     description: { type: String, trim: true },
     visibility: { type: String, enum: ['public', 'private', 'company'], default: 'public' },
+    joinKey: { type: String, select: false },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     members: [channelMemberSchema],
     tags: [String],

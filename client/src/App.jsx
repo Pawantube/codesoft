@@ -13,12 +13,14 @@ import EditJob from './pages/EditJob';
 import EmployerDashboard from './pages/EmployerDashboard';
 import EmployerManageJob from './pages/EmployerManageJob';
 import VideoFeed from './pages/VideoFeed';
-import CandidateDashboard from './pages/CandidateDashboard';
+import CandidateDashboardPage from './pages/CandidateDashboardPage';
 import PostJob from './pages/PostJob';
 import LiveCoding from './pages/LiveCoding';
-import LiveCall from './pages/LiveCall';
+import LiveCallPage from './pages/LiveCallPage';
 import ChatPage from './pages/ChatPage';
 import Channels from './pages/Channels';
+import Posts from './pages/Posts';
+import Interested from './pages/Interested';
 import AuthProvider, { useAuth } from './context/AuthContext';
 
 function Protected({ role, children }) {
@@ -47,16 +49,20 @@ export default function App() {
             <Route path="/employer/manage/:id" element={<Protected role="employer"><EmployerManageJob /></Protected>} />
             <Route path="/employer/jobs" element={<Protected role="employer"><EmployerJobs /></Protected>} />
             <Route path="/employer/edit/:id" element={<Protected role="employer"><EditJob /></Protected>} />
-            <Route path="/candidate" element={<Protected role="candidate"><CandidateDashboard /></Protected>} />
+            <Route path="/candidate" element={<Protected role="candidate"><CandidateDashboardPage /></Protected>} />
             <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
-            <Route path="/profile" element={<Protected><Profile /></Protected>} />`r`n            <Route path="/discover" element={<Protected><VideoFeed /></Protected>} />`r`n            <Route path="/channels" element={<Protected><Channels /></Protected>} />
+            <Route path="/profile" element={<Protected><Profile /></Protected>} />
+            <Route path="/discover" element={<Protected><VideoFeed /></Protected>} />
+            <Route path="/channels" element={<Protected><Channels /></Protected>} />
+            <Route path="/interested" element={<Protected role="employer"><Interested /></Protected>} />
+            <Route path="/posts" element={<Protected><Posts /></Protected>} />
             <Route path="/chat" element={<Protected><ChatPage /></Protected>} />
             <Route path="/coding/:id" element={<Protected><LiveCoding /></Protected>} />
-            <Route path="/call/:id" element={<Protected><LiveCall /></Protected>} />
+            <Route path="/call/:id" element={<Protected><LiveCallPage /></Protected>} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
-        <footer className="py-6 text-center text-sm text-gray-500">© {year} SawConnect Job Board</footer>
+        <footer className="py-6 text-center text-sm text-gray-500">ï¿½ {year} SawConnect Job Board</footer>
         <InstallPromptBanner />
       </div>
     </AuthProvider>
