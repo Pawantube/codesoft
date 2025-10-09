@@ -49,10 +49,14 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+// Support multiple client origins in production (comma-separated)
+const CLIENT_URLS = (process.env.CLIENT_URLS || process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 // socket.io
-const io = initSocket(server, { corsOrigin: CLIENT_URL });
+const io = initSocket(server, { corsOrigin: CLIENT_URLS });
 app.use((req, _res, next) => { req.io = io; next(); });
 
 // security + logs
@@ -60,7 +64,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(morgan('dev'));
 
 // CORS
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
+app.use(cors({ origin: CLIENT_URLS, credentials: true }));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
@@ -84,7 +88,8 @@ app.get('/uploads/videos/:filename', (req, res, next) => {
 // PUBLIC static: /uploads (once, with headers)
 app.use('/uploads', express.static(UPLOADS_DIR, {
   setHeaders(res) {
-    res.setHeader('Access-Control-Allow-Origin', CLIENT_URL);
+    // Static assets don't need credentials; allow any origin for videos/images
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Accept-Ranges', 'bytes');
   },

@@ -40,7 +40,14 @@ export default function LiveCallPage() {
           localStreamRef.current = stream;
           if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-          const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          const TURN_URL = import.meta.env.VITE_TURN_URL;
+          const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME;
+          const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL;
+          const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+          if (TURN_URL && TURN_USERNAME && TURN_CREDENTIAL) {
+            iceServers.push({ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_CREDENTIAL });
+          }
+          const pc = new RTCPeerConnection({ iceServers });
           pcRef.current = pc;
           stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
