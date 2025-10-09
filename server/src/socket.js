@@ -6,6 +6,8 @@ const verifyChannelMember = async (channelId, userId) => {
   return { ok: true, channel, member };
 };
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
+import Redis from "ioredis";
 import jwt from "jsonwebtoken";
 import Conversation from "./models/Conversation.js";
 import CodingSession from "./models/CodingSession.js";
@@ -41,6 +43,21 @@ const buildCallParticipantsPayload = (sockets, room) =>
 
 export function initSocket(httpServer, { corsOrigin }) {
   const io = new Server(httpServer, { cors: { origin: corsOrigin, credentials: true } });
+
+  // Attach Redis adapter so rooms work across multiple server instances
+  try {
+    const redisUrl = process.env.REDIS_URL;
+    if (redisUrl) {
+      const pub = new Redis(redisUrl);
+      const sub = new Redis(redisUrl);
+      io.adapter(createAdapter(pub, sub));
+      console.log("✅ Socket.io Redis adapter enabled");
+    } else {
+      console.log("ℹ️ REDIS_URL not set - Socket.io running without cluster adapter");
+    }
+  } catch (err) {
+    console.error("Redis adapter init failed", err);
+  }
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
