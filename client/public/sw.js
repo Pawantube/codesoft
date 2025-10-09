@@ -43,7 +43,10 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(request).catch(() => caches.match(request))
+      fetch(request).catch(async () => {
+        const cached = await caches.match(request);
+        return cached || Response.error();
+      })
     );
     return;
   }
@@ -74,7 +77,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           return response;
         })
-        .catch(() => undefined);
+        .catch(() => Response.error());
     })
   );
 });

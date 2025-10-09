@@ -31,6 +31,8 @@ export default function Profile() {
   const [videoFile, setVideoFile] = useState(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoJson, setAutoJson] = useState(null);
+  const [resumeFile, setResumeFile] = useState(null);
 
   useEffect(() => {
     api.get('/users/me').then((res) => {
@@ -56,6 +58,30 @@ export default function Profile() {
 
   const handleChange = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const autofillFromResume = async () => {
+    if (!resumeFile) { alert('Select a resume file'); return; }
+    try {
+      const fd = new FormData();
+      fd.append('resume', resumeFile);
+      const res = await api.post('/resume/parse', fd);
+      setAutoJson(res.data || {});
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Parse failed');
+    }
+  };
+  const applyAutofill = () => {
+    const j = autoJson || {};
+    setForm((prev) => ({
+      ...prev,
+      name: j.name || prev.name,
+      headline: j.headline || prev.headline,
+      location: j.location || prev.location,
+      skills: toListString(j.skills) || prev.skills,
+      bio: j.summary || prev.bio,
+    }));
+    setAutoJson(null);
   };
 
   const handleLinkChange = (key, value) => {
@@ -133,6 +159,26 @@ export default function Profile() {
         <div className="mt-2">
           <AvatarUploader />
         </div>
+
+      {user?.role === 'candidate' && (
+        <section className="rounded-xl border p-4">
+          <h2 className="text-sm font-semibold">Autofill From Resume (AI)</h2>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input type="file" accept=".pdf,.doc,.docx,.rtf" onChange={(e)=>setResumeFile(e.target.files?.[0]||null)} />
+            <button type="button" onClick={autofillFromResume} className="rounded border px-3 py-1 text-sm">Parse</button>
+          </div>
+          {autoJson && (
+            <div className="mt-3 text-sm">
+              <div className="font-medium">Preview</div>
+              <pre className="mt-1 whitespace-pre-wrap border rounded p-2 max-h-64 overflow-auto">{JSON.stringify(autoJson, null, 2)}</pre>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={applyAutofill} className="rounded bg-green-600 text-white px-3 py-1 text-sm">Apply</button>
+                <button type="button" onClick={()=>setAutoJson(null)} className="rounded border px-3 py-1 text-sm">Discard</button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       </section>
 
       <input

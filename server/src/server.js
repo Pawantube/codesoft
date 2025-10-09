@@ -26,6 +26,11 @@ import mediaRoutes from './routes/mediaRoutes.js';
 import postRoutes from './routes/postRoutes.js';
 import screeningRoutes from './routes/screeningRoutes.js';
 import interviewRoutes from './routes/interviewRoutes.js';
+import referralRoutes, { attachReferralRedirect } from './routes/referralRoutes.js';
+import matchRoutes from './routes/matchRoutes.js';
+import recommendationsRoutes from './routes/recommendationsRoutes.js';
+import resumeRoutes from './routes/resumeRoutes.js';
+import moderationRoutes from './routes/moderationRoutes.js';
 import { initSocket } from './socket.js';
 console.log(process.env.cloudinary_url)
 // ESM dirname
@@ -116,6 +121,12 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/screenings', screeningRoutes);
 app.use('/api/interview', interviewRoutes);
+attachReferralRedirect(app);
+app.use('/api/referrals', referralRoutes);
+app.use('/api/match', matchRoutes);
+app.use('/api/recommendations', recommendationsRoutes);
+app.use('/api/resume', resumeRoutes);
+app.use('/api/moderate', moderationRoutes);
 
 // chat routes AFTER io attach
 import chatRoutes from './routes/chatRoutes.js';

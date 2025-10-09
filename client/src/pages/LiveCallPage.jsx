@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getSocket, initSocket } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
+import { showToast } from '../utils/toast';
 import Editor from '@monaco-editor/react';
 
 // Minimal 1:1 WebRTC call page with screenshare, signaled via socket.io
@@ -22,10 +23,14 @@ export default function LiveCallPage() {
   const [sessionId, setSessionId] = useState('');
   const [notes, setNotes] = useState([]);
   const [noteText, setNoteText] = useState('');
+  const [noteTag, setNoteTag] = useState('general'); // 'general' | 'strength' | 'concern' | 'next_step'
+  const [noteFilter, setNoteFilter] = useState('all'); // 'all' + tags
   const [transcriptText, setTranscriptText] = useState('');
   const [summaryText, setSummaryText] = useState('');
   const [savingTranscript, setSavingTranscript] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  const [transcriptSavedAt, setTranscriptSavedAt] = useState(null);
+  const [calendarMeta, setCalendarMeta] = useState(null);
   const [recording, setRecording] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const mediaRecorderRef = useRef(null);
@@ -39,6 +44,12 @@ export default function LiveCallPage() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const otherUserIdRef = useRef(null); // kept for compatibility but no longer required for signaling
+  const roleRef = useRef('participant');
+  const politeRef = useRef(true);
+  const makingOfferRef = useRef(false);
+  const ignoreOfferRef = useRef(false);
+  const settingRemoteAnswerPendingRef = useRef(false);
+  const pendingIceRef = useRef([]);
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef({ x: 0, y: 0 });
@@ -53,20 +64,57 @@ export default function LiveCallPage() {
       const socket = getSocket();
       if (!socket) throw new Error('Socket not connected');
 
+      const getIceServers = async () => {
+        // 1) Try Metered dynamic credentials if provided
+        const sub = import.meta.env.VITE_METERED_SUBDOMAIN;
+        const key = import.meta.env.VITE_METERED_API_KEY;
+        if (sub && key) {
+          try {
+            const url = `https://${sub}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(key)}`;
+            const res = await fetch(url, { method: 'GET' });
+            if (res.ok) {
+              const data = await res.json().catch(() => ({}));
+              if (Array.isArray(data.iceServers) && data.iceServers.length) {
+                return data.iceServers;
+              }
+            }
+          } catch {}
+        }
+
+        // 2) Fallback to in-house env lists
+        const STUN_URLS = (import.meta.env.VITE_STUN_URLS || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const TURN_URLS = (import.meta.env.VITE_TURN_URLS || import.meta.env.VITE_TURN_URL || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME;
+        const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL;
+        const iceServers = [];
+        if (STUN_URLS.length) STUN_URLS.forEach(u=> iceServers.push({ urls: u }));
+        else iceServers.push({ urls: 'stun:stun.l.google.com:19302' });
+        if (TURN_URLS.length && TURN_USERNAME && TURN_CREDENTIAL) {
+          TURN_URLS.forEach(u=> iceServers.push({ urls: u, username: TURN_USERNAME, credential: TURN_CREDENTIAL }));
+        }
+        return iceServers;
+      };
+  // Debounced autosave for transcript
+  const transcriptSaveTimer = useRef(null);
+  useEffect(() => {
+    if (!transcriptText) return; // avoid saving empty on first load
+    if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current);
+    transcriptSaveTimer.current = setTimeout(async () => {
+      try {
+        await api.post(`/interview/${applicationId}/transcript`, { transcriptText });
+        setTranscriptSavedAt(new Date());
+      } catch {}
+    }, 1200);
+    return () => { if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current); };
+  }, [transcriptText, applicationId]);
+
       const join = async () => {
         setJoining(true);
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
           localStreamRef.current = stream;
           if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
-          const TURN_URL = import.meta.env.VITE_TURN_URL;
-          const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME;
-          const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL;
-          const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-          if (TURN_URL && TURN_USERNAME && TURN_CREDENTIAL) {
-            iceServers.push({ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_CREDENTIAL });
-          }
+          const iceServers = await getIceServers();
           const pc = new RTCPeerConnection({ iceServers });
           pcRef.current = pc;
           stream.getTracks().forEach((t) => pc.addTrack(t, stream));
@@ -74,6 +122,19 @@ export default function LiveCallPage() {
           pc.onicecandidate = (e) => {
             if (e.candidate) {
               socket.emit('call:ice', { applicationId, candidate: e.candidate });
+            }
+          };
+
+          pc.onnegotiationneeded = async () => {
+            try {
+              makingOfferRef.current = true;
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              socket.emit('call:offer', { applicationId, description: pc.localDescription });
+            } catch (e) {
+              // swallow
+            } finally {
+              makingOfferRef.current = false;
             }
           };
 
@@ -107,7 +168,7 @@ export default function LiveCallPage() {
   const startRecording = async () => {
     if (recording) return;
     const mixed = buildMixedAudioStream();
-    if (!mixed) { alert('AudioContext not available'); return; }
+    if (!mixed) { showToast({ title: 'Recording error', message: 'AudioContext not available' }); return; }
     try {
       recordedChunksRef.current = [];
       const mr = new MediaRecorder(mixed, { mimeType: 'audio/webm' });
@@ -120,7 +181,7 @@ export default function LiveCallPage() {
       mr.start(250);
       setRecording(true);
     } catch (e) {
-      alert('Recording failed');
+      showToast({ title: 'Recording failed', message: 'Try again or upload audio manually.' });
     }
   };
   const stopRecording = () => {
@@ -138,7 +199,7 @@ export default function LiveCallPage() {
       const res = await api.post(`/interview/${applicationId}/transcribe`, fd);
       if (res?.data?.transcriptText) setTranscriptText(res.data.transcriptText);
     } catch (e) {
-      alert(e?.response?.data?.error || 'Transcription failed');
+      showToast({ title: 'Transcription failed', message: e?.response?.data?.error || 'Please try again.' });
     } finally {
       setUploadingAudio(false);
     }
@@ -155,29 +216,82 @@ export default function LiveCallPage() {
             if (remoteVideoRef.current && remote) remoteVideoRef.current.srcObject = remote;
           };
 
-          const makeOffer = async () => {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            socket.emit('call:offer', { applicationId, description: offer });
+          const maybeNegotiate = async () => {
+            const pc = pcRef.current;
+            if (!pc) return;
+            if (pc.signalingState !== 'stable') return;
+            try {
+              makingOfferRef.current = true;
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              socket.emit('call:offer', { applicationId, description: pc.localDescription });
+            } catch {}
+            finally { makingOfferRef.current = false; }
           };
 
-          const onParticipants = ({ participants }) => {
-            // If there is another participant present, create an offer
+          const onParticipants = ({ participants, role }) => {
+            // Use server-provided role to set polite side deterministically
+            roleRef.current = role || roleRef.current;
+            politeRef.current = roleRef.current === 'employer' || roleRef.current === 'team';
+            // If someone else is present now, ensure an offer is sent at least once
             const me = user?._id;
-            const others = participants.filter((p) => String(p.userId) !== String(me));
-            if (others.length) makeOffer();
+            const others = (participants||[]).filter((p)=>String(p.userId)!==String(me));
+            if (others.length) { maybeNegotiate(); }
           };
-          const onPeerJoined = () => { makeOffer(); };
+          const onPeerJoined = () => { maybeNegotiate(); };
           const onPeerLeft = () => { otherUserIdRef.current = null; };
+          const drainPendingIce = async () => {
+            const pc = pcRef.current;
+            const list = pendingIceRef.current;
+            pendingIceRef.current = [];
+            for (const cand of list) {
+              try { await pc.addIceCandidate(cand); } catch {}
+            }
+          };
+
           const onOffer = async ({ from, description }) => {
             otherUserIdRef.current = from || null;
-            await pc.setRemoteDescription(description);
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('call:answer', { applicationId, description: answer });
+            const pc = pcRef.current;
+            const offerCollision = makingOfferRef.current || settingRemoteAnswerPendingRef.current;
+            ignoreOfferRef.current = !politeRef.current && offerCollision;
+            if (ignoreOfferRef.current) return;
+            try {
+              if (offerCollision) {
+                await Promise.resolve(); // allow state to settle
+              }
+              await pc.setRemoteDescription(description);
+              const answer = await pc.createAnswer();
+              settingRemoteAnswerPendingRef.current = true;
+              await pc.setLocalDescription(answer);
+              socket.emit('call:answer', { applicationId, description: pc.localDescription });
+              await drainPendingIce();
+            } catch (e) {
+              // swallow
+            } finally {
+              settingRemoteAnswerPendingRef.current = false;
+            }
           };
-          const onAnswer = async ({ description }) => { await pc.setRemoteDescription(description); };
-          const onIce = async ({ candidate }) => { try { await pc.addIceCandidate(candidate); } catch {} };
+          const onAnswer = async ({ description }) => {
+            const pc = pcRef.current;
+            // Only accept an answer if we are in have-local-offer state
+            if (pc.signalingState !== 'have-local-offer') {
+              return; // stale or out-of-order answer
+            }
+            try {
+              await pc.setRemoteDescription(description);
+              await drainPendingIce();
+            } catch {}
+          };
+          const onIce = async ({ candidate }) => {
+            const pc = pcRef.current;
+            try {
+              if (!pc.remoteDescription) {
+                pendingIceRef.current.push(candidate);
+              } else {
+                await pc.addIceCandidate(candidate);
+              }
+            } catch {}
+          };
           const onCode = ({ content }) => { setCode(String(content ?? '')); };
           const onWbStroke = ({ stroke }) => { drawStroke(stroke); };
           const onWbClear = () => { clearCanvas(); };
@@ -209,6 +323,8 @@ export default function LiveCallPage() {
 
           socket.emit('call:join', { applicationId });
           setReady(true);
+          // ring all authorized peers on this application so they get the banner
+          try { socket.emit('call:ring-app', { applicationId }); } catch {}
 
           // return cleanup function for listeners
           return cleanup;
@@ -219,10 +335,11 @@ export default function LiveCallPage() {
         }
       };
 
-      // expose join for button handler
+      // expose join for potential retries
       window.__joinCall = join;
-      // nothing to cleanup yet until user joins; return a no-op
-      return () => {};
+      // auto-join immediately and return its cleanup
+      const cleanup = await join();
+      return cleanup;
     };
 
     const maybeSetTeardown = (res) => {
@@ -247,6 +364,30 @@ export default function LiveCallPage() {
       try { teardown(); } catch {}
     };
   }, [applicationId, user?._id]);
+
+  // Calendar meta for deep-links
+  useEffect(() => {
+    const loadMeta = async () => {
+      try {
+        const res = await api.get(`/interview/${applicationId}/meta`);
+        setCalendarMeta(res.data || null);
+      } catch { setCalendarMeta(null); }
+    };
+    loadMeta();
+  }, [applicationId]);
+
+  const fmtGoogleDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const p = (n)=>String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}${p(d.getUTCMonth()+1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+  };
+  const googleUrl = calendarMeta ?
+    `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarMeta.title||'Interview')}&dates=${fmtGoogleDate(calendarMeta.at)}/${fmtGoogleDate(calendarMeta.end)}&details=${encodeURIComponent(calendarMeta.description||'')}&location=${encodeURIComponent(calendarMeta.location||'')}`
+    : null;
+  const outlookUrl = calendarMeta ?
+    `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(calendarMeta.title||'Interview')}&body=${encodeURIComponent(calendarMeta.description||'')}&startdt=${encodeURIComponent(calendarMeta.at||'')}&enddt=${encodeURIComponent(calendarMeta.end||'')}&location=${encodeURIComponent(calendarMeta.location||'')}`
+    : null;
 
   // --- Code editor emit ---
   const emitCode = (next) => {
@@ -357,7 +498,7 @@ export default function LiveCallPage() {
     const text = (noteText || '').trim();
     if (!text) return;
     try {
-      const res = await api.post(`/interview/${applicationId}/notes`, { text });
+      const res = await api.post(`/interview/${applicationId}/notes`, { text, tag: noteTag });
       setNotes(res.data?.notes || []);
       setNoteText('');
     } catch {}
@@ -366,16 +507,43 @@ export default function LiveCallPage() {
     try {
       setSavingTranscript(true);
       await api.post(`/interview/${applicationId}/transcript`, { transcriptText });
-    } catch {} finally { setSavingTranscript(false); }
+      showToast({ title: 'Transcript saved' });
+    } catch (e) {
+      showToast({ title: 'Save failed', message: e?.response?.data?.error || 'Please try again.' });
+    } finally { setSavingTranscript(false); }
   };
   const summarizeTranscript = async () => {
     try {
       setSummarizing(true);
       const res = await api.post(`/interview/${applicationId}/summarize`);
       setSummaryText(res.data?.summaryText || '');
+      const provider = res.data?.provider || 'ai';
+      showToast({ title: 'Summary ready', message: provider === 'openai' ? 'Powered by AI' : 'Fallback summary generated' });
     } catch (e) {
-      // show minimal fallback
+      showToast({ title: 'Summary failed', message: e?.response?.data?.error || 'Please try again.' });
     } finally { setSummarizing(false); }
+  };
+
+  // Utilities
+  const copyToClipboard = async (label, text) => {
+    try { await navigator.clipboard.writeText(text || ''); showToast({ title: `${label} copied` }); }
+    catch { showToast({ title: 'Copy failed', message: 'Clipboard unavailable' }); }
+  };
+  const downloadText = (filename, text) => {
+    const blob = new Blob([text || ''], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  };
+
+  const addTimestampedNote = async (tag = 'general') => {
+    try {
+      const ts = new Date();
+      const pad = (n)=>String(n).padStart(2,'0');
+      const stamp = `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`;
+      const res = await api.post(`/interview/${applicationId}/notes`, { text: `[${stamp}]`, tag });
+      setNotes(res.data?.notes || []);
+      showToast({ title: 'Timestamp added' });
+    } catch {}
   };
 
   const toggleMute = () => {
@@ -407,8 +575,8 @@ export default function LiveCallPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl p-4 space-y-3">
-      <div className="rounded-xl border bg-white p-3">
+    <div className="w-full h-full flex flex-col p-2 sm:p-3 gap-3">
+      <div className="rounded-xl border bg-white p-3 shrink-0">
         <div className="flex items-center justify-between">
           <div className="text-sm">
             <div className="font-semibold">Live Call</div>
@@ -425,6 +593,7 @@ export default function LiveCallPage() {
                 <button onClick={toggleMute} className="rounded border px-3 py-1 text-sm">{muted ? 'Unmute' : 'Mute'}</button>
                 <button onClick={toggleCamera} className="rounded border px-3 py-1 text-sm">{cameraOff ? 'Camera On' : 'Camera Off'}</button>
                 <button onClick={shareScreen} className="rounded border px-3 py-1 text-sm">Share screen</button>
+                <button onClick={()=>addTimestampedNote()} className="rounded border px-3 py-1 text-sm">Add timestamp</button>
                 <button onClick={leave} className="rounded bg-red-600 px-3 py-1 text-sm text-white">Leave</button>
               </>
             )}
@@ -435,13 +604,26 @@ export default function LiveCallPage() {
           <button className={`px-3 py-1 rounded ${tab==='code'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('code')}>Code</button>
           <button className={`px-3 py-1 rounded ${tab==='whiteboard'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('whiteboard')}>Whiteboard</button>
           <button className={`px-3 py-1 rounded ${tab==='notes'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('notes')}>Notes</button>
+          {/* Calendar */}
+          <a
+            href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000')}/api/interview/${applicationId}/ics`}
+            className="ml-auto px-3 py-1 rounded border"
+          >
+            Download ICS
+          </a>
+          {googleUrl && (
+            <a href={googleUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border">Google</a>
+          )}
+          {outlookUrl && (
+            <a href={outlookUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border">Outlook</a>
+          )}
         </div>
       </div>
 
       {tab === 'video' && (
-        <div className="grid gap-3 md:grid-cols-2">
-          <video ref={localVideoRef} autoPlay playsInline muted className="w-full rounded-lg border bg-black" />
-          <video ref={remoteVideoRef} autoPlay playsInline className="w-full rounded-lg border bg-black" />
+        <div className="grid gap-3 md:grid-cols-2 flex-1 min-h-0">
+          <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full rounded-lg border bg-black object-cover" />
+          <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full rounded-lg border bg-black object-cover" />
         </div>
       )}
 
@@ -493,14 +675,38 @@ export default function LiveCallPage() {
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <input className="flex-1 border rounded px-2 py-1 text-sm" placeholder="Write a quick note" value={noteText} onChange={(e)=>setNoteText(e.target.value)} />
+                  <select value={noteTag} onChange={(e)=>setNoteTag(e.target.value)} className="border rounded px-2 py-1 text-xs">
+                    <option value="general">General</option>
+                    <option value="strength">Strength</option>
+                    <option value="concern">Concern</option>
+                    <option value="next_step">Next step</option>
+                  </select>
                   <button onClick={addNote} className="px-3 py-1 rounded bg-gray-900 text-white text-sm">Add</button>
                 </div>
+                <div className="flex items-center justify-between text-xs text-gray-600">
+                  <div className="flex items-center gap-2">
+                    <span>Filter:</span>
+                    <select value={noteFilter} onChange={(e)=>setNoteFilter(e.target.value)} className="border rounded px-2 py-1">
+                      <option value="all">All</option>
+                      <option value="general">General</option>
+                      <option value="strength">Strength</option>
+                      <option value="concern">Concern</option>
+                      <option value="next_step">Next step</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button className="underline" onClick={()=>copyToClipboard('Notes', (notes||[]).map(n=>`[${n.tag||'general'}] ${n.text}`).join('\n'))}>Copy</button>
+                    <button className="underline" onClick={()=>downloadText(`notes-${applicationId}.txt`, (notes||[]).map(n=>`[${n.tag||'general'}] ${n.text}`).join('\n'))}>Export</button>
+                  </div>
+                </div>
                 <div className="border rounded p-2 max-h-72 overflow-auto text-sm">
-                  {notes.length === 0 && <div className="text-gray-500">No notes yet.</div>}
-                  {notes.map((n, idx) => (
+                  {notes.filter(n=>noteFilter==='all' || n.tag===noteFilter).length === 0 && <div className="text-gray-500">No notes yet.</div>}
+                  {notes.filter(n=>noteFilter==='all' || n.tag===noteFilter).map((n, idx) => (
                     <div key={idx} className="border-b py-1 last:border-b-0">
-                      <div>{n.text}</div>
-                      <div className="text-[11px] text-gray-500">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</div>
+                      <div className="flex items-center justify-between">
+                        <div><span className="text-[10px] uppercase tracking-wide text-gray-400 mr-2">{(n.tag||'general').replace('_',' ')}</span>{n.text}</div>
+                        <div className="text-[11px] text-gray-500">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -522,13 +728,20 @@ export default function LiveCallPage() {
             <div>
               <div className="font-semibold text-sm mb-1">Transcript</div>
               <textarea className="w-full min-h-[160px] border rounded p-2 text-sm" value={transcriptText} onChange={(e)=>setTranscriptText(e.target.value)} placeholder="Paste the transcript here (or use your call recorder and paste results)…" />
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button disabled={savingTranscript} onClick={saveTranscript} className="px-3 py-1 rounded border text-sm disabled:opacity-50">{savingTranscript? 'Saving…':'Save Transcript'}</button>
                 <button disabled={summarizing} onClick={summarizeTranscript} className="px-3 py-1 rounded bg-purple-600 text-white text-sm disabled:opacity-50">{summarizing? 'Summarizing…':'Summarize'}</button>
+                <button className="px-3 py-1 rounded border text-sm" onClick={()=>copyToClipboard('Transcript', transcriptText)}>Copy</button>
+                <button className="px-3 py-1 rounded border text-sm" onClick={()=>downloadText(`transcript-${applicationId}.txt`, transcriptText)}>Export</button>
+                {transcriptSavedAt && <span className="text-xs text-gray-500">Saved {new Date(transcriptSavedAt).toLocaleTimeString()}</span>}
               </div>
               <div className="mt-3">
                 <div className="font-semibold text-sm mb-1">AI Summary</div>
                 <div className="text-sm whitespace-pre-wrap border rounded p-2 min-h-[80px]">{summaryText || '—'}</div>
+                <div className="mt-2 flex gap-2 text-sm">
+                  <button className="px-3 py-1 rounded border" onClick={()=>copyToClipboard('Summary', summaryText)}>Copy</button>
+                  <button className="px-3 py-1 rounded border" onClick={()=>downloadText(`summary-${applicationId}.txt`, summaryText)}>Export</button>
+                </div>
               </div>
             </div>
           </div>

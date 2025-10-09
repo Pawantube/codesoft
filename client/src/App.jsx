@@ -1,4 +1,4 @@
-import { Route, Routes, Navigate } from 'react-router-dom';
+import { Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import IncomingCallBanner from './components/IncomingCallBanner';
 import InstallPromptBanner from './components/InstallPromptBanner';
@@ -21,6 +21,7 @@ import LiveCallPage from './pages/LiveCallPage';
 import ChatPage from './pages/ChatPage';
 import Channels from './pages/Channels';
 import Posts from './pages/Posts';
+import Screening from './pages/Screening';
 import Interested from './pages/Interested';
 import AuthProvider, { useAuth } from './context/AuthContext';
 import Toaster from './components/Toaster.jsx';
@@ -35,13 +36,15 @@ function Protected({ role, children }) {
 
 export default function App() {
   const year = new Date().getFullYear();
+  const location = useLocation();
+  const onCall = location.pathname.startsWith('/call/');
 
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-gray-50 text-gray-900">
-        <Navbar />
-        <IncomingCallBanner />
-        <main className="mx-auto flex w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+      <div className={onCall ? 'min-h-screen bg-black text-white' : 'min-h-screen bg-gray-50 text-gray-900'}>
+        {!onCall && <Navbar />}
+        {!onCall && <IncomingCallBanner />}
+        <main className={onCall ? 'w-screen h-screen p-0 m-0' : 'mx-auto flex w-full max-w-6xl flex-1 px-4 py-6 sm:px-6'}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/jobs" element={<Jobs />} />
@@ -55,18 +58,18 @@ export default function App() {
             <Route path="/employer/edit/:id" element={<Protected role="employer"><EditJob /></Protected>} />
             <Route path="/candidate" element={<Protected role="candidate"><CandidateDashboardPage /></Protected>} />
             <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
-            <Route path="/profile" element={<Protected><Profile /></Protected>} />
             <Route path="/discover" element={<Protected><VideoFeed /></Protected>} />
             <Route path="/channels" element={<Protected><Channels /></Protected>} />
-            <Route path="/interested" element={<Protected role="employer"><Interested /></Protected>} />
+            <Route path="/Interested" element={<Protected role="employer"><Interested /></Protected>} />
             <Route path="/posts" element={<Protected><Posts /></Protected>} />
             <Route path="/chat" element={<Protected><ChatPage /></Protected>} />
-            <Route path="/coding/:id" element={<Protected><LiveCoding /></Protected>} />
+            <Route path="/call/:id" element={<Protected><div className="min-h-screen flex flex-col"><LiveCallPage /></div></Protected>} />
+            <Route path="/screening/:id" element={<Protected role="candidate"><Screening /></Protected>} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
-        <footer className="py-6 text-center text-sm text-gray-500">� {year} SawConnect Job Board</footer>
-        <InstallPromptBanner />
+        {!onCall && <footer className="py-6 text-center text-sm text-gray-500">� {year} SawConnect Job Board</footer>}
+        {!onCall && <InstallPromptBanner />}
         <Toaster />
       </div>
     </AuthProvider>

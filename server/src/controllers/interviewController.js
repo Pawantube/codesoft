@@ -8,6 +8,33 @@ const ensureRecord = async (applicationId) => {
   return rec;
 };
 
+export const getInterviewMeta = async (req, res) => {
+  const { applicationId } = req.params;
+  try {
+    const app = await (await import('../models/Application.js')).default
+      .findById(applicationId)
+      .populate({ path: 'job', select: 'title company location employer' })
+      .lean();
+    if (!app) return res.status(404).json({ error: 'Application not found' });
+    const at = app?.interview?.at ? new Date(app.interview.at) : null;
+    const durationMin = 45;
+    const end = at ? new Date(new Date(at).getTime() + durationMin*60000) : null;
+    const title = `${app.job?.title || 'Interview'}${app.job?.company ? ' – ' + app.job.company : ''}`;
+    const description = `Interview for ${app.job?.title || ''}${app.job?.company ? ' at ' + app.job.company : ''}`.trim();
+    const location = app.job?.location || '';
+    res.json({
+      applicationId: String(app._id),
+      at: at ? at.toISOString() : null,
+      end: end ? end.toISOString() : null,
+      title,
+      description,
+      location,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load interview meta' });
+  }
+};
+
 // Return ICS calendar for a scheduled interview
 export const getInterviewICS = async (req, res) => {
   const { applicationId } = req.params;
@@ -95,10 +122,12 @@ export const getInterview = async (req, res) => {
 
 export const addNote = async (req, res) => {
   const { applicationId } = req.params;
-  const { text } = req.body || {};
+  const { text, tag } = req.body || {};
   if (!text || !String(text).trim()) return res.status(400).json({ error: 'Note text required' });
   const rec = await ensureRecord(applicationId);
-  rec.notes.push({ author: req.user._id, text: String(text) });
+  const allowed = new Set(['general', 'strength', 'concern', 'next_step']);
+  const safeTag = allowed.has(String(tag)) ? String(tag) : 'general';
+  rec.notes.push({ author: req.user._id, text: String(text), tag: safeTag });
   await rec.save();
   res.status(201).json({ ok: true, notes: rec.notes });
 };

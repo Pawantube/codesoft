@@ -12,6 +12,10 @@ export default function EmployerManageJob() {
   const [invites, setInvites] = useState({}); // appId -> { at, notes, sending }
   const [statusFilter, setStatusFilter] = useState('');
   const [taskModals, setTaskModals] = useState({}); // appId -> { open, title, description, dueAt, attachments(string) }
+  const [topCandidates, setTopCandidates] = useState([]);
+  const [screeningModals, setScreeningModals] = useState({}); // appId -> { open, data, loading }
+  const [referrals, setReferrals] = useState([]);
+  const [refLoading, setRefLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -24,6 +28,67 @@ export default function EmployerManageJob() {
       setLoading(false);
     }
   };
+
+  // --- Screening helpers ---
+  const openScreening = async (appId) => {
+    setScreeningModals((p)=>({ ...p, [appId]: { ...(p[appId]||{}), open: true, loading: true } }));
+    try {
+      const res = await api.get(`/screenings/${appId}`);
+      setScreeningModals((p)=>({ ...p, [appId]: { open: true, loading: false, data: res.data||null } }));
+    } catch {
+      setScreeningModals((p)=>({ ...p, [appId]: { open: true, loading: false, data: null } }));
+      alert('No screening found');
+    }
+  };
+  const closeScreening = (appId) => setScreeningModals((p)=>({ ...p, [appId]: { ...(p[appId]||{}), open: false } }));
+  const autoEval = async (appId) => {
+    setScreeningModals((p)=>({ ...p, [appId]: { ...(p[appId]||{}), loading: true } }));
+    try {
+      const res = await api.post(`/screenings/${appId}/auto-eval`);
+      const evaln = res.data?.evaluation;
+      setScreeningModals((p)=>({ ...p, [appId]: { ...(p[appId]||{}), loading: false, data: { ...(p[appId]?.data||{}), evaluation: evaln } } }));
+    } catch (e) {
+      setScreeningModals((p)=>({ ...p, [appId]: { ...(p[appId]||{}), loading: false } }));
+      alert(e?.response?.data?.error || 'Auto-eval failed');
+    }
+  };
+  const exportCSV = (appId) => {
+    const base = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    window.open(`${base}/api/screenings/${appId}/export-csv`, '_blank');
+  };
+
+  // --- Referrals helpers ---
+  const loadReferrals = async () => {
+    setRefLoading(true);
+    try {
+      const res = await api.get('/referrals', { params: { job: id } });
+      setReferrals(Array.isArray(res.data) ? res.data : []);
+    } catch { setReferrals([]); }
+    finally { setRefLoading(false); }
+  };
+  const genReferral = async () => {
+    try {
+      await api.post('/referrals', { jobId: id });
+      await loadReferrals();
+    } catch (e) { alert(e?.response?.data?.error || 'Failed to create link'); }
+  };
+  const markPaid = async (refId) => {
+    try { await api.post(`/referrals/${refId}/payout`); await loadReferrals(); }
+    catch (e) { alert(e?.response?.data?.error || 'Failed to mark paid'); }
+  };
+  const copyToClipboard = async (text) => { try { await navigator.clipboard.writeText(text||''); alert('Copied'); } catch {} };
+
+  useEffect(() => {
+    const fetchRecs = async () => {
+      try {
+        const res = await api.get('/recommendations/candidates', { params: { job: id } });
+        setTopCandidates(Array.isArray(res.data) ? res.data : []);
+      } catch {}
+    };
+    if (id) fetchRecs();
+    if (id) loadReferrals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const setStatus = async (appId, status) => {
     await api.patch(`/applications/${appId}/status`, { status });
@@ -145,6 +210,30 @@ export default function EmployerManageJob() {
   const startCall = (applicationId) => {
     navigate(`/call/${applicationId}`);
   };
+
+  const fmtGoogleDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const p = (n)=>String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}${p(d.getUTCMonth()+1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+  };
+  const openCalendarLinks = async (appId, which) => {
+    try {
+      const res = await api.get(`/interview/${appId}/meta`);
+      const m = res.data || {};
+      if (!m.at) return;
+      if (which === 'google') {
+        const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(m.title||'Interview')}&dates=${fmtGoogleDate(m.at)}/${fmtGoogleDate(m.end)}&details=${encodeURIComponent(m.description||'')}&location=${encodeURIComponent(m.location||'')}`;
+        window.open(url, '_blank');
+      } else if (which === 'outlook') {
+        const url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(m.title||'Interview')}&body=${encodeURIComponent(m.description||'')}&startdt=${encodeURIComponent(m.at||'')}&enddt=${encodeURIComponent(m.end||'')}&location=${encodeURIComponent(m.location||'')}`;
+        window.open(url, '_blank');
+      } else if (which === 'ics') {
+        const base = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        window.open(`${base}/api/interview/${appId}/ics`, '_blank');
+      }
+    } catch {}
+  };
   const openChat = async (applicationId, otherUserId) => {
     if (!otherUserId) {
       alert('Candidate user not found for this application.');
@@ -180,6 +269,98 @@ export default function EmployerManageJob() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Applicants</h1>
+
+      <section className="rounded-xl border bg-white p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Top Candidates (AI)</h2>
+          <span className="text-xs text-gray-500">Job ID: {id}</span>
+        </div>
+
+      {/* Screening Review Modal(s) */}
+      {Object.entries(screeningModals).map(([appId, m]) => (
+        m?.open ? (
+          <div key={appId} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="w-full max-w-2xl rounded-xl bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">Screening Review</div>
+                <button onClick={()=>closeScreening(appId)} className="text-sm">Close</button>
+              </div>
+              {m.loading && <div className="text-sm text-gray-600">Loading…</div>}
+              {!m.loading && !m.data && <div className="text-sm text-gray-600">No screening found for this application.</div>}
+              {!m.loading && m.data && (
+                <div className="space-y-3">
+                  {m.data.videoUrl && (
+                    <video src={m.data.videoUrl} controls className="w-full rounded border" />
+                  )}
+                  <div className="text-xs text-gray-600">Status: {m.data.status}</div>
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <button onClick={()=>autoEval(appId)} className="px-3 py-1 rounded border">Auto-Evaluate</button>
+                    <button onClick={()=>exportCSV(appId)} className="px-3 py-1 rounded border">Export CSV</button>
+                  </div>
+                  {m.data.evaluation && (
+                    <div className="rounded border p-2 text-sm">
+                      <div className="font-medium">Rubric</div>
+                      <div className="grid grid-cols-2 gap-1 mt-1">
+                        <div>Clarity: {m.data.evaluation?.rubric?.clarity ?? 0}</div>
+                        <div>Structure: {m.data.evaluation?.rubric?.structure ?? 0}</div>
+                        <div>Technical: {m.data.evaluation?.rubric?.technical ?? 0}</div>
+                        <div>Total: {m.data.evaluation?.totalScore ?? 0}</div>
+                      </div>
+                      {m.data.evaluation?.feedback && (
+                        <div className="mt-2 whitespace-pre-wrap">{m.data.evaluation.feedback}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null
+      ))}
+        <div className="mt-2 grid gap-2">
+          {topCandidates.length === 0 && (
+            <div className="text-sm text-gray-500">No recommendations yet.</div>
+          )}
+          {topCandidates.map((c) => (
+            <div key={c.id} className="rounded border p-3 flex items-center justify-between text-sm">
+              <div>
+                <div className="font-medium">{c.name}</div>
+                <div className="text-xs text-gray-600">{c.headline || c.location}</div>
+              </div>
+              <div className="text-xs text-gray-600">Match {c.score}%</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-xl border bg-white p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Referrals & Bounty</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={genReferral} className="px-3 py-1 rounded border text-sm">Generate Link</button>
+            <button onClick={loadReferrals} className="px-3 py-1 rounded border text-sm">Refresh</button>
+          </div>
+        </div>
+        {refLoading && <div className="text-sm text-gray-600 mt-2">Loading…</div>}
+        {!refLoading && referrals.length === 0 && (
+          <div className="text-sm text-gray-500 mt-2">No referrals yet.</div>
+        )}
+        <div className="mt-2 grid gap-2">
+          {referrals.map((r) => (
+            <div key={r._id || r.id} className="rounded border p-3 text-sm flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="font-medium">Code: {r.code}</div>
+                {r.url && <div className="text-xs text-gray-600 break-all">{r.url}</div>}
+                <div className="text-xs text-gray-600">Clicks: {r.clickedCount || 0} • Status: {r.status}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {r.url && <button onClick={()=>copyToClipboard(r.url)} className="px-2 py-1 rounded border text-xs">Copy URL</button>}
+                {r.status !== 'paid' && <button onClick={()=>markPaid(r._id || r.id)} className="px-2 py-1 rounded border text-xs">Mark Paid</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="flex items-center gap-2">
         <label className="text-sm">Filter:</label>
@@ -266,8 +447,19 @@ export default function EmployerManageJob() {
                   Start Video Call
                 </button>
 
+                {/* Calendar quick-links if interview scheduled */}
+                {application?.interview?.status === 'scheduled' && (
+                  <>
+                    <button onClick={()=>openCalendarLinks(application._id,'ics')} className="px-3 py-1 rounded border text-xs">ICS</button>
+                    <button onClick={()=>openCalendarLinks(application._id,'google')} className="px-3 py-1 rounded border text-xs">Google</button>
+                    <button onClick={()=>openCalendarLinks(application._id,'outlook')} className="px-3 py-1 rounded border text-xs">Outlook</button>
+                  </>
+                )}
+
                 <button onClick={() => inviteNow(application._id)} className="px-3 py-1 rounded bg-purple-100 text-purple-800 border">Invite Now</button>
                 <button onClick={() => openTaskModal(application._id)} className="px-3 py-1 rounded bg-amber-600 text-white">Assign Task</button>
+                {/* Screening Actions */}
+                <button onClick={() => openScreening(application._id)} className="px-3 py-1 rounded border">View Screening</button>
               </div>
 
               {!hasResume && (

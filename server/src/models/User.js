@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import Emb from '../services/embeddingsService.js';
 import bcrypt from 'bcryptjs';
 
 const linkSchema = new mongoose.Schema({
@@ -43,7 +44,6 @@ const userSchema = new mongoose.Schema({
   videoNotes: String,
   videoMetrics: { type: metricsSchema, default: () => ({}) },
 }, { timestamps: true });
-
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   const salt = await bcrypt.genSalt(10);
@@ -54,5 +54,14 @@ userSchema.pre('save', async function (next) {
 userSchema.methods.comparePassword = function (candidate) {
   return bcrypt.compare(candidate, this.password);
 };
+
+// upsert profile embedding after save when relevant fields change
+userSchema.post('save', async function(doc) {
+  try {
+    if (doc.role === 'candidate') {
+      await Emb.upsertProfileEmbedding(doc._id);
+    }
+  } catch {}
+});
 
 export default mongoose.model('User', userSchema);

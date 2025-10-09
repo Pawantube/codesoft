@@ -53,6 +53,41 @@ export default function CandidateDashboardPage() {
     .filter((a) => a?.status && a?.job)
     .filter((a) => a?.interview && a.interview.status === 'scheduled');
 
+  const [recommended, setRecommended] = useState([]);
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await api.get('/recommendations/jobs');
+        setRecommended(Array.isArray(res.data) ? res.data : []);
+      } catch {}
+    };
+    load();
+  }, []);
+
+  const fmtGoogleDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const p = (n)=>String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}${p(d.getUTCMonth()+1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+  };
+  const openCalendarLinks = async (appId, which) => {
+    try {
+      const res = await api.get(`/interview/${appId}/meta`);
+      const m = res.data || {};
+      if (!m.at) return;
+      if (which === 'google') {
+        const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(m.title||'Interview')}&dates=${fmtGoogleDate(m.at)}/${fmtGoogleDate(m.end)}&details=${encodeURIComponent(m.description||'')}&location=${encodeURIComponent(m.location||'')}`;
+        window.open(url, '_blank');
+      } else if (which === 'outlook') {
+        const url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(m.title||'Interview')}&body=${encodeURIComponent(m.description||'')}&startdt=${encodeURIComponent(m.at||'')}&enddt=${encodeURIComponent(m.end||'')}&location=${encodeURIComponent(m.location||'')}`;
+        window.open(url, '_blank');
+      } else if (which === 'ics') {
+        const base = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+        window.open(`${base}/api/interview/${appId}/ics`, '_blank');
+      }
+    } catch {}
+  };
+
   const setSubmitField = (appId, taskId, key, value) => {
     const k = `${appId}:${taskId}`;
     setSubmitForms((p) => ({ ...p, [k]: { ...(p[k]||{}), [key]: value } }));
@@ -106,9 +141,28 @@ export default function CandidateDashboardPage() {
                   <div><span className="font-medium">Notes:</span> {a.interview.notes}</div>
                 )}
               </div>
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap gap-2 items-center">
                 <button onClick={() => navigate(`/call/${a.id || a._id}`)} className="rounded bg-purple-600 text-white px-3 py-1 text-sm">Join Video Call</button>
+                <button onClick={()=>openCalendarLinks(a.id||a._id,'ics')} className="rounded border px-3 py-1 text-xs">ICS</button>
+                <button onClick={()=>openCalendarLinks(a.id||a._id,'google')} className="rounded border px-3 py-1 text-xs">Google</button>
+                <button onClick={()=>openCalendarLinks(a.id||a._id,'outlook')} className="rounded border px-3 py-1 text-xs">Outlook</button>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-xl border bg-white p-4">
+        <h2 className="text-sm font-semibold">Recommended Jobs</h2>
+        <div className="mt-2 grid gap-2">
+          {recommended.length === 0 && <div className="text-sm text-gray-500">No recommendations yet.</div>}
+          {recommended.map((j) => (
+            <div key={j.id} className="rounded border p-3 flex items-center justify-between">
+              <div>
+                <div className="font-medium">{j.title} – {j.company}</div>
+                <div className="text-xs text-gray-600">{j.location}</div>
+              </div>
+              <div className="text-xs text-gray-600">Match {j.score}%</div>
             </div>
           ))}
         </div>

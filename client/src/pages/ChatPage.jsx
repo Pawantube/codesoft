@@ -34,7 +34,7 @@ export default function ChatPage() {
   const [searchRoleFilter, setSearchRoleFilter] = useState('all'); // all | candidate | employer | team
   const [searchJobFilter, setSearchJobFilter] = useState('');
   const [sendingCall, setSendingCall] = useState(false);
-  const [inlineCallId, setInlineCallId] = useState(null); // open call inline
+  // Removed inline modal approach; we navigate to /call/:id for full-screen
 
   const bottomRef = useRef(null);
   const initialConversationRef = useRef(new URLSearchParams(location.search).get('c'));
@@ -272,8 +272,8 @@ export default function ChatPage() {
       }
       // Fallback broadcast ring (candidate, employer, team)
       getSocket()?.emit('call:ring-app', { applicationId: appId });
-      // Open inline call modal for initiator
-      setInlineCallId(appId);
+      // Navigate initiator to the call page (full-screen flow)
+      navigate(`/call/${appId}`);
     } catch (e) {
       console.error(e);
       alert('Failed to start call');
@@ -469,7 +469,7 @@ export default function ChatPage() {
                     {appId && (
                       <button
                         className={`ml-2 underline ${mine ? 'text-white' : 'text-blue-600'}`}
-                        onClick={() => setInlineCallId(appId)}
+                        onClick={() => navigate(`/call/${appId}`)}
                       >
                         Join video call
                       </button>
@@ -538,38 +538,17 @@ export default function ChatPage() {
               <div className="text-xs text-gray-500">Application ID</div>
               <div className="rounded border p-2 text-xs break-all">{activeConversation.applicationId}</div>
               <div className="pt-2">
-                <a
-                  href={`/call/${activeConversation?.applicationId || ''}`}
+                <button
+                  onClick={() => navigate(`/call/${activeConversation?.applicationId || ''}`)}
                   className="inline-block rounded-lg border px-3 py-1.5 text-xs"
-                  target="_blank"
-                  rel="noreferrer"
                 >
                   Open Call
-                </a>
+                </button>
               </div>
             </div>
           </div>
         )}
-        {/* Inline Call Modal */}
-        {inlineCallId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="relative w-full max-w-5xl rounded-xl bg-white shadow-xl">
-              <button
-                onClick={() => setInlineCallId(null)}
-                className="absolute right-3 top-3 rounded border px-2 py-1 text-xs"
-              >
-                Close
-              </button>
-              <div className="h-[75vh] w-full overflow-hidden rounded-b-xl">
-                <iframe
-                  title="Live Call"
-                  src={`/call/${inlineCallId}`}
-                  className="h-full w-full"
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Inline call modal removed for consistent full-screen experience */}
       </main>
     </div>
   );

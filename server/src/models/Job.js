@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import Emb from '../services/embeddingsService.js';
 
 const faqSchema = new mongoose.Schema(
   { q: String, a: String },
@@ -30,5 +31,10 @@ const jobSchema = new mongoose.Schema(
 );
 
 jobSchema.index({ title: 'text', description: 'text', company: 'text', location: 'text' });
+
+// Upsert embedding after create/update (must be before model compile)
+jobSchema.post('save', async function(doc) {
+  try { await Emb.upsertJobEmbedding(doc._id); } catch {}
+});
 
 export default mongoose.model('Job', jobSchema);

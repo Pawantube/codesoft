@@ -34,6 +34,7 @@ const applicationSchema = new mongoose.Schema({
     default:'submitted'
   },
   interview: { type: interviewSchema, default: null },
-  tasks: { type: [taskSchema], default: [] }
+  tasks: { type: [taskSchema], default: [] },
+  matchScore: { type: Number, default: 0 }
 },{timestamps:true});
 export default mongoose.model('Application', applicationSchema);

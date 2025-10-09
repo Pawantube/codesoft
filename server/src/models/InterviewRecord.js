@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const noteSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   text: { type: String, default: '' },
+  tag: { type: String, enum: ['general', 'strength', 'concern', 'next_step'], default: 'general' },
   createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 

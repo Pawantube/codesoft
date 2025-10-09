@@ -108,3 +108,75 @@ export const reviewScreening = async (req, res) => {
   await scr.save();
   res.json({ ok: true });
 };
+
+const OPENAI_URL_CHAT = 'https://api.openai.com/v1/chat/completions';
+const callOpenAI = async ({ messages, model='gpt-4o-mini', temperature=0.2 }) => {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('OPENAI_API_KEY missing');
+  const resp = await fetch(OPENAI_URL_CHAT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages, temperature })
+  });
+  if (!resp.ok) throw new Error(`OpenAI ${resp.status}`);
+  const data = await resp.json();
+  return data?.choices?.[0]?.message?.content || '';
+};
+
+export const autoEvaluateScreening = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const scr = await Screening.findOne({ application: applicationId }).populate('job');
+    if (!scr) return res.status(404).json({ error: 'Not found' });
+
+    // For now, we evaluate based on job title/desc only (no transcript). Extend later with transcript.
+    const job = scr.job || {};
+    const prompt = `Evaluate a candidate's async video screening against this job. Score 0-5 for clarity, structure, technical depth. Return strict JSON with keys clarity, structure, technical, total (0-15) and feedback (short paragraph). Job: ${job.title || ''} at ${job.company || ''}.`;
+    const content = await callOpenAI({ messages: [
+      { role: 'system', content: 'You are a technical interviewer. Return strict JSON only.' },
+      { role: 'user', content: prompt }
+    ]});
+    let json;
+    try { json = JSON.parse(content); } catch { json = { clarity: 3, structure: 3, technical: 3, total: 9, feedback: content } }
+    scr.evaluation = {
+      totalScore: Number(json.total ?? (Number(json.clarity||0)+Number(json.structure||0)+Number(json.technical||0))),
+      rubric: {
+        clarity: Number(json.clarity||0),
+        structure: Number(json.structure||0),
+        technical: Number(json.technical||0),
+      },
+      feedback: String(json.feedback || '')
+    };
+    await scr.save();
+    res.json({ ok: true, evaluation: scr.evaluation });
+  } catch (e) {
+    res.status(500).json({ error: 'Auto-eval failed' });
+  }
+};
+
+export const exportScreeningCSV = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const scr = await Screening.findOne({ application: applicationId }).populate('job candidate application');
+    if (!scr) return res.status(404).end('Not found');
+    const rows = [
+      ['Job', scr.job?.title || ''],
+      ['Candidate', scr.candidate?.name || ''],
+      [],
+      ['Rubric','Score'],
+      ['Clarity', scr.evaluation?.rubric?.clarity ?? 0],
+      ['Structure', scr.evaluation?.rubric?.structure ?? 0],
+      ['Technical', scr.evaluation?.rubric?.technical ?? 0],
+      ['Total', scr.evaluation?.totalScore ?? 0],
+      [],
+      ['Feedback'],
+      [scr.evaluation?.feedback || '']
+    ];
+    const csv = rows.map(r => r.map(v => typeof v === 'string' && v.includes(',') ? '"'+v.replace(/"/g,'""')+'"' : v).join(',')).join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="screening-eval.csv"');
+    res.send(csv);
+  } catch (e) {
+    res.status(500).end('Export failed');
+  }
+};
