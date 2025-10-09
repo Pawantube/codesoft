@@ -24,6 +24,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [text, setText] = useState('');
+  const [showProfile, setShowProfile] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null); // { applicationId, from }
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -32,6 +34,7 @@ export default function ChatPage() {
   const [searchRoleFilter, setSearchRoleFilter] = useState('all'); // all | candidate | employer | team
   const [searchJobFilter, setSearchJobFilter] = useState('');
   const [sendingCall, setSendingCall] = useState(false);
+  const [inlineCallId, setInlineCallId] = useState(null); // open call inline
 
   const bottomRef = useRef(null);
   const initialConversationRef = useRef(new URLSearchParams(location.search).get('c'));
@@ -142,10 +145,15 @@ export default function ChatPage() {
 
     socket.on('chat:new', handleNewMessage);
     socket.on('chat:poke', handlePoke);
+    const handleRing = ({ applicationId, from }) => {
+      setIncomingCall({ applicationId, from });
+    };
+    socket.on('call:ring', handleRing);
 
     return () => {
       socket.off('chat:new', handleNewMessage);
       socket.off('chat:poke', handlePoke);
+      socket.off('call:ring', handleRing);
     };
   }, [loadConversations, markConversationRead]);
 
@@ -257,6 +265,15 @@ export default function ChatPage() {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(callUrl);
       }
+      // notify other participant about the call
+      const targetUserId = activeConversation?.otherParticipant?.id || activeConversation?.otherParticipant?._id;
+      if (targetUserId) {
+        getSocket()?.emit('call:ring', { applicationId: appId, targetUserId });
+      }
+      // Fallback broadcast ring (candidate, employer, team)
+      getSocket()?.emit('call:ring-app', { applicationId: appId });
+      // Open inline call modal for initiator
+      setInlineCallId(appId);
     } catch (e) {
       console.error(e);
       alert('Failed to start call');
@@ -367,7 +384,7 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      <main className="lg:col-span-8 flex h-[70vh] flex-col rounded-xl border bg-white">
+      <main className="lg:col-span-8 relative flex h-[70vh] flex-col rounded-xl border bg-white">
         <div className="border-b p-4">
           {activeConversation ? (
             <div>
@@ -391,6 +408,12 @@ export default function ChatPage() {
                 >
                   Open Call
                 </a>
+                <button
+                  onClick={() => setShowProfile(true)}
+                  className="rounded-lg border px-3 py-1.5 text-xs"
+                >
+                  View Profile
+                </button>
               </div>
             </div>
           ) : (
@@ -399,12 +422,41 @@ export default function ChatPage() {
         </div>
 
         <div className="flex-1 overflow-auto p-4">
+          {incomingCall && (
+            <div className="mb-3 rounded-lg border bg-yellow-50 p-3 text-sm text-gray-800">
+              <div className="flex items-center justify-between">
+                <div>Incoming call</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const appId = incomingCall.applicationId;
+                      setIncomingCall(null);
+                      navigate(`/call/${appId}`);
+                    }}
+                    className="rounded bg-green-600 px-3 py-1 text-xs font-semibold text-white"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => setIncomingCall(null)}
+                    className="rounded border px-3 py-1 text-xs"
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {loadingMessages && <div className="text-sm text-gray-500">Loading messages...</div>}
           {!loadingMessages && messages.length === 0 && (
             <div className="text-sm text-gray-500">No messages yet.</div>
           )}
           {messages.map((message) => {
             const mine = String(message.sender) === String(user?._id);
+            const body = String(message.body || '');
+            // Match either '/call/:id' or any full URL that ends with /call/:id
+            const callMatch = body.match(/\b\/call\/([A-Za-z0-9_-]+)\b|\bhttps?:\/\/[^\s]*\/call\/([A-Za-z0-9_-]+)\b/);
+            const appId = callMatch ? (callMatch[1] || callMatch[2]) : null;
             return (
               <div key={message._id} className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
                 <div
@@ -412,7 +464,17 @@ export default function ChatPage() {
                     mine ? 'bg-gray-900 text-white' : 'bg-white'
                   }`}
                 >
-                  <div className="text-sm whitespace-pre-wrap">{message.body}</div>
+                  <div className="text-sm whitespace-pre-wrap">
+                    {body}
+                    {appId && (
+                      <button
+                        className={`ml-2 underline ${mine ? 'text-white' : 'text-blue-600'}`}
+                        onClick={() => setInlineCallId(appId)}
+                      >
+                        Join video call
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-1 text-[10px] opacity-60">{formatDate(message.createdAt)}</div>
                 </div>
               </div>
@@ -445,6 +507,69 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
+
+        {showProfile && activeConversation && (
+          <div className="absolute right-0 top-0 h-full w-full max-w-sm border-l bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div className="text-sm font-semibold">Profile</div>
+              <button
+                onClick={() => setShowProfile(false)}
+                className="rounded border px-2 py-1 text-xs"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-sm">
+              <div>
+                <div className="text-base font-semibold">{activeConversation.otherParticipant?.name || 'User'}</div>
+                {activeConversation.otherParticipant?.role && (
+                  <div className="text-xs text-gray-500">{activeConversation.otherParticipant.role}</div>
+                )}
+              </div>
+              {activeConversation.job && (
+                <div className="rounded-lg border p-3 bg-gray-50">
+                  <div className="text-xs text-gray-500">Associated Job</div>
+                  <div className="text-sm font-medium">{activeConversation.job.title}</div>
+                  {activeConversation.job.company && (
+                    <div className="text-xs text-gray-600">{activeConversation.job.company}</div>
+                  )}
+                </div>
+              )}
+              <div className="text-xs text-gray-500">Application ID</div>
+              <div className="rounded border p-2 text-xs break-all">{activeConversation.applicationId}</div>
+              <div className="pt-2">
+                <a
+                  href={`/call/${activeConversation?.applicationId || ''}`}
+                  className="inline-block rounded-lg border px-3 py-1.5 text-xs"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open Call
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Inline Call Modal */}
+        {inlineCallId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="relative w-full max-w-5xl rounded-xl bg-white shadow-xl">
+              <button
+                onClick={() => setInlineCallId(null)}
+                className="absolute right-3 top-3 rounded border px-2 py-1 text-xs"
+              >
+                Close
+              </button>
+              <div className="h-[75vh] w-full overflow-hidden rounded-b-xl">
+                <iframe
+                  title="Live Call"
+                  src={`/call/${inlineCallId}`}
+                  className="h-full w-full"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

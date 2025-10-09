@@ -105,12 +105,21 @@ export default function Channels() {
     if (!socket) return;
 
     const handleMessage = (payload) => {
-      setMessages((prev) => {
-        const exists = prev.some((m) => m.id === payload.id);
-        return exists ? prev : [...prev, payload];
-      });
-      // Update lastMessageAt for unread badge
-      setChannels((prev) => prev.map((ch) => ch.id === payload.channelId ? { ...ch, lastMessageAt: payload.createdAt } : ch));
+      const isActive = selectedId && payload.channelId === selectedId;
+      if (isActive) {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === payload.id);
+          return exists ? prev : [...prev, payload];
+        });
+        // actively viewing: mark seen on server
+        api.post(`/channels/${selectedId}/seen`).catch(() => {});
+      }
+      // Update lastMessageAt and unread counters locally
+      setChannels((prev) => prev.map((ch) => {
+        if (ch.id !== payload.channelId) return ch;
+        const bump = isActive ? 0 : 1;
+        return { ...ch, lastMessageAt: payload.createdAt, unreadCount: Math.max(0, (ch.unreadCount || 0) + bump) };
+      }));
     };
     const handleError = ({ channelId, error }) => {
       setError(error || 'Channel error');
@@ -119,6 +128,12 @@ export default function Channels() {
       if (selectedId) {
         socket.emit('channel:join', { channelId: selectedId });
       }
+      // retry any failed messages in the current channel
+      setMessages((prev) => {
+        const toRetry = prev.filter((m) => m.status === 'failed');
+        toRetry.forEach((m) => retrySend(m));
+        return prev;
+      });
     };
     const handleTyping = ({ channelId, user: from }) => {
       if (!channelId || channelId !== selectedId) return;
@@ -155,7 +170,10 @@ export default function Channels() {
       try {
         await ensureMembership(selectedId);
         await loadMessages(selectedId);
+        // join room and mark seen on server, reset local unread for this channel
         getSocket()?.emit('channel:join', { channelId: selectedId });
+        api.post(`/channels/${selectedId}/seen`).catch(() => {});
+        setChannels((prev) => prev.map((ch) => ch.id === selectedId ? { ...ch, unreadCount: 0 } : ch));
       } catch (err) {
         setError(err.message);
       }
@@ -180,17 +198,40 @@ export default function Channels() {
     if (!messageBody.trim() || !selectedChannel) return;
     const body = messageBody.trim();
     setMessageBody('');
+
+    const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const localMsg = {
+      id: tempId,
+      channelId: selectedChannel.id,
+      body,
+      createdAt: new Date().toISOString(),
+      author: { id: user?._id, name: user?.name },
+      status: 'sending', // sending | failed | delivered
+      local: true,
+    };
+    setMessages((prev) => [...prev, localMsg]);
+
     try {
       const res = await api.post(`/channels/${selectedChannel.id}/messages`, { body });
-      setMessages((prev) => {
-        const exists = prev.some((m) => m.id === res.data.id);
-        return exists ? prev : [...prev, res.data];
-      });
-      // Touch lastMessageAt
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...res.data, status: 'delivered' } : m)));
       setChannels((prev) => prev.map((ch) => ch.id === selectedChannel.id ? { ...ch, lastMessageAt: res.data.createdAt } : ch));
     } catch (err) {
       console.error(err);
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)));
       setError(err?.response?.data?.error || 'Unable to send message');
+    }
+  };
+
+  const retrySend = async (message) => {
+    if (!selectedChannel || !message?.body) return;
+    const tempId = message.id;
+    setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, status: 'sending' } : m)));
+    try {
+      const res = await api.post(`/channels/${selectedChannel.id}/messages`, { body: message.body });
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...res.data, status: 'delivered' } : m)));
+      setChannels((prev) => prev.map((ch) => ch.id === selectedChannel.id ? { ...ch, lastMessageAt: res.data.createdAt } : ch));
+    } catch (err) {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)));
     }
   };
 
@@ -355,7 +396,14 @@ export default function Channels() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span>{channel.name}</span>
+                  <span className="flex items-center gap-2">
+                    {channel.name}
+                    {!!channel.unreadCount && (
+                      <span className="inline-flex items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">
+                        {channel.unreadCount}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[10px] uppercase text-gray-400">
                     {channel.visibility}
                   </span>
@@ -418,12 +466,20 @@ export default function Channels() {
               )}
               <div className="space-y-3">
                 {messages.map((message) => (
-                  <div key={`${message.id}-${message.createdAt}`} className="rounded-lg border px-3 py-2">
-                    <div className="text-sm font-semibold text-gray-800">
-                      {message.author?.name || 'Unknown'}{' '}
-                      <span className="text-xs text-gray-400">
-                        {new Date(message.createdAt).toLocaleString()}
-                      </span>
+                  <div key={`${message.id || message.tempId}-${message.createdAt}`} className="rounded-lg border px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-gray-800">
+                        {message.author?.name || 'Unknown'}{' '}
+                        <span className="text-xs text-gray-400 ml-1">
+                          {new Date(message.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      {message.status === 'sending' && (
+                        <span className="text-[10px] text-gray-400">Sending…</span>
+                      )}
+                      {message.status === 'failed' && (
+                        <button onClick={() => retrySend(message)} className="text-[10px] text-red-600 underline">Retry</button>
+                      )}
                     </div>
                     <div className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">
                       {message.body}

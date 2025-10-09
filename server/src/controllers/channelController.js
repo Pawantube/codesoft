@@ -1,6 +1,7 @@
 import slugify from 'slugify';
 import Channel from '../models/Channel.js';
 import ChannelMessage from '../models/ChannelMessage.js';
+import ChannelRead from '../models/ChannelRead.js';
 
 const buildSlug = async (name) => {
   const base = slugify(name, { lower: true, strict: true });
@@ -38,6 +39,22 @@ export const listChannels = async (req, res) => {
     .populate({ path: 'members.user', select: 'name avatarUrl role' })
     .lean();
 
+  // compute unread counts per channel for the current user
+  const channelIds = channels.map((c) => String(c._id));
+  const reads = await ChannelRead.find({ user: req.user._id, channel: { $in: channelIds } })
+    .select('channel lastSeenAt')
+    .lean();
+  const readMap = new Map(reads.map((r) => [String(r.channel), r.lastSeenAt]));
+
+  const counts = await Promise.all(
+    channelIds.map(async (id) => {
+      const lastSeenAt = readMap.get(id) || new Date(0);
+      const unread = await ChannelMessage.countDocuments({ channel: id, createdAt: { $gt: lastSeenAt } });
+      return [id, unread];
+    })
+  );
+  const unreadMap = new Map(counts);
+
   const payload = channels.map((channel) => {
     const member = channel.members?.find((m) => String(m.user?._id || m.user) === String(req.user._id));
     return {
@@ -51,6 +68,7 @@ export const listChannels = async (req, res) => {
       memberRole: member?.role || null,
       tags: channel.tags || [],
       updatedAt: channel.updatedAt,
+      unreadCount: unreadMap.get(String(channel._id)) || 0,
     };
   });
 
@@ -203,4 +221,18 @@ export const postMessage = async (req, res) => {
   req.io?.to(`channel:${id}`).emit('channel:new-message', payload);
 
   res.status(201).json(payload);
+};
+
+export const markSeen = async (req, res) => {
+  const { id } = req.params;
+  const channel = await Channel.findById(id).select('_id members');
+  if (!channel) return res.status(404).json({ error: 'Channel not found' });
+  const isMember = channel.members?.some((m) => String(m.user) === String(req.user._id));
+  if (!isMember) return res.status(403).json({ error: 'Forbidden' });
+  await ChannelRead.findOneAndUpdate(
+    { user: req.user._id, channel: channel._id },
+    { $set: { lastSeenAt: new Date() } },
+    { upsert: true }
+  );
+  res.json({ ok: true });
 };

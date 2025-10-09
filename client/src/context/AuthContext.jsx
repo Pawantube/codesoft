@@ -10,10 +10,12 @@ export const useAuth = () => useContext(AuthCtx);
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem('token') || '');
+  const [bootstrapping, setBootstrapping] = useState(Boolean(localStorage.getItem('token')));
 
   // Load current user when token changes
   useEffect(() => {
     if (token) {
+      setBootstrapping(true);
       setAuthToken(token);
       api
         .get('/users/me')
@@ -36,10 +38,12 @@ export default function AuthProvider({ children }) {
                 .catch(() => {});
             }, 15000);
           }
-        });
+        })
+        .finally(() => setBootstrapping(false));
     } else {
       setAuthToken(null);
       setUser(null);
+      setBootstrapping(false);
     }
   }, [token]);
 
@@ -74,13 +78,19 @@ export default function AuthProvider({ children }) {
   };
 
   const logout = async () => {
+    const withTimeout = (p, ms = 2000) =>
+      Promise.race([
+        p.catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, ms)),
+      ]);
+
     try {
-      if (token) await removePushSubscription(token);
+      if (token) await withTimeout(removePushSubscription(token));
     } catch {
-      // ignore push cleanup errors
+      // ignore
     } finally {
-      closeSocket();
-      localStorage.removeItem('token');
+      try { closeSocket(); } catch {}
+      try { localStorage.removeItem('token'); } catch {}
       setAuthToken(null);
       setToken('');
       setUser(null);
@@ -88,7 +98,7 @@ export default function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, token, login, register, logout, setUser }}>
+    <AuthCtx.Provider value={{ user, token, login, register, logout, setUser, bootstrapping }}>
       {children}
     </AuthCtx.Provider>
   );

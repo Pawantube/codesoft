@@ -3,6 +3,7 @@ import Message from '../models/Message.js';
 import Notification from '../models/Notification.js';
 import Application from '../models/Application.js';
 import Job from '../models/Job.js';
+import User from '../models/User.js';
 import { canStartOrSend } from '../utils/chatPolicy.js';
 
 const conversationPopulate = [
@@ -244,86 +245,96 @@ export const searchChatPartners = async (req, res) => {
   if (query.length < 2) return res.json([]);
 
   const regex = new RegExp(escapeRegex(query), 'i');
-  const userId = String(req.user._id);
-  const results = new Map();
+  const me = String(req.user._id);
 
-  if (req.user.role === 'candidate') {
-    const applications = await Application.find({ candidate: userId })
-      .populate({
-        path: 'job',
-        select: 'title company employer team',
-        populate: [
-          { path: 'employer', select: 'name email role avatarUrl companyName headline' },
-          { path: 'team', select: 'name email role avatarUrl companyName headline' }
-        ]
-      })
-      .lean();
+  // 1) Global user search by name/email/companyName
+  const users = await User.find({
+    _id: { $ne: me },
+    $or: [
+      { name: regex },
+      { email: regex },
+      { companyName: regex },
+      { headline: regex }
+    ]
+  })
+    .select('_id name email role avatarUrl companyName headline')
+    .limit(25)
+    .lean();
 
-    applications.forEach((app) => {
-      if (!app.job) return;
-      const job = app.job;
-      const jobSummary = {
-        id: String(job._id),
-        title: job.title || '',
-        company: job.company || ''
-      };
+  if (!users.length) return res.json([]);
 
-      const pushContact = (contact, relation) => {
-        if (!contact) return;
-        if (!regex.test(contact.name || '') && !regex.test(contact.email || '') && !regex.test(contact.companyName || '')) return;
-        const key = `${contact._id}:${app._id}`;
-        addResult(results, key, {
-          userId: String(contact._id),
-          name: contact.name,
-          email: contact.email,
-          role: contact.role,
-          avatarUrl: contact.avatarUrl || null,
-          companyName: contact.companyName || null,
-          headline: contact.headline || null,
-          applicationId: String(app._id),
-          job: jobSummary,
-          relation
-        });
-      };
+  // 2) For each target, find an application that links me <-> target
+  // Candidate perspective: app.candidate = me AND (job.employer = target OR target in job.team)
+  // Employer/team perspective: (job.employer = me OR me in job.team) AND candidate = target
+  const targetIds = users.map((u) => u._id);
+  const asCandidate = await Application.find({
+    candidate: me,
+    $or: [{ job: { $exists: true } }]
+  })
+    .populate({
+      path: 'job',
+      select: 'title company employer team',
+      populate: [
+        { path: 'employer', select: '_id' },
+        { path: 'team', select: '_id' }
+      ]
+    })
+    .lean();
 
-      pushContact(job.employer, 'employer');
-      if (Array.isArray(job.team)) {
-        job.team.forEach((member) => pushContact(member, 'team'));
-      }
+  const myJobs = await Job.find({
+    $or: [{ employer: me }, { team: me }]
+  })
+    .select('_id title company employer team')
+    .lean();
+
+  const appsWithMyJobs = await Application.find({ job: { $in: myJobs.map((j) => j._id) } })
+    .populate({ path: 'candidate', select: '_id name email role avatarUrl headline' })
+    .lean();
+
+  const results = [];
+  const pushIfLinked = (target, applicationDoc, relation, jobDoc) => {
+    if (!applicationDoc) return;
+    results.push({
+      userId: String(target._id),
+      name: target.name,
+      email: target.email,
+      role: target.role,
+      avatarUrl: target.avatarUrl || null,
+      companyName: target.companyName || null,
+      headline: target.headline || null,
+      applicationId: String(applicationDoc._id),
+      job: jobDoc
+        ? { id: String(jobDoc._id), title: jobDoc.title || '', company: jobDoc.company || '' }
+        : null,
+      relation
     });
-  } else if (req.user.role === 'employer') {
-    const jobs = await Job.find({ employer: userId }).select('_id title company').lean();
-    const jobById = new Map(jobs.map((job) => [String(job._id), job]));
-    const jobIds = jobs.map((job) => job._id);
+  };
 
-    if (jobIds.length) {
-      const applications = await Application.find({ job: { $in: jobIds } })
-        .populate({ path: 'candidate', select: 'name email role avatarUrl headline' })
-        .lean();
-
-      applications.forEach((app) => {
-        if (!app.candidate) return;
-        if (!regex.test(app.candidate.name || '') && !regex.test(app.candidate.email || '') && !regex.test(app.candidate.headline || '')) return;
-        const job = jobById.get(String(app.job));
-        const key = `${app.candidate._id}:${app._id}`;
-        addResult(results, key, {
-          userId: String(app.candidate._id),
-          name: app.candidate.name,
-          email: app.candidate.email,
-          role: app.candidate.role,
-          avatarUrl: app.candidate.avatarUrl || null,
-          headline: app.candidate.headline || null,
-          applicationId: String(app._id),
-          job: job
-            ? { id: String(job._id), title: job.title || '', company: job.company || '' }
-            : null,
-          relation: 'candidate'
-        });
-      });
+  users.forEach((u) => {
+    // candidate -> employer/team
+    let linked = null;
+    let jobForLinked = null;
+    if (String(req.user.role) === 'candidate') {
+      for (const app of asCandidate) {
+        const employerId = String(app.job?.employer || '');
+        const teamIds = (app.job?.team || []).map((t) => String(t._id || t));
+        if (employerId === String(u._id) || teamIds.includes(String(u._id))) {
+          linked = app;
+          jobForLinked = app.job || null;
+          break;
+        }
+      }
+      if (linked) pushIfLinked(u, linked, linked.job?.employer && String(linked.job.employer) === String(u._id) ? 'employer' : 'team', jobForLinked);
+      return;
     }
-  } else {
-    return res.json([]);
-  }
 
-  res.json(Array.from(results.values()).slice(0, 15));
+    // employer/team -> candidate
+    const app = appsWithMyJobs.find((a) => String(a.candidate?._id || a.candidate) === String(u._id));
+    if (app) {
+      const job = myJobs.find((j) => String(j._id) === String(app.job)) || null;
+      pushIfLinked(u, app, 'candidate', job);
+    }
+  });
+
+  res.json(results.slice(0, 15));
 };

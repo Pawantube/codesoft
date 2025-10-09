@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import NotificationsBell from './NotificationsBell';
@@ -10,7 +10,6 @@ export default function Navbar() {
   const navigate = useNavigate();
 
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
-
   const toggleMobile = () => setMobileOpen((prev) => !prev);
   const menuButtonLabel = mobileOpen ? 'Close menu' : 'Open menu';
 
@@ -19,7 +18,7 @@ export default function Navbar() {
       return (
         <button
           onClick={async () => {
-            try { await logout(); } catch { /* ignore */ }
+            try { await logout(); } catch {}
             setMobileOpen(false);
             navigate('/login');
           }}

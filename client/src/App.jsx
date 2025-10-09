@@ -1,5 +1,6 @@
 import { Route, Routes, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import IncomingCallBanner from './components/IncomingCallBanner';
 import InstallPromptBanner from './components/InstallPromptBanner';
 import Home from './pages/Home';
 import Jobs from './pages/Jobs';
@@ -24,7 +25,8 @@ import Interested from './pages/Interested';
 import AuthProvider, { useAuth } from './context/AuthContext';
 
 function Protected({ role, children }) {
-  const { user } = useAuth();
+  const { user, bootstrapping } = useAuth();
+  if (bootstrapping) return null; // wait until /users/me resolves
   if (!user) return <Navigate to="/login" />;
   if (role && user.role !== role) return <Navigate to="/" />;
   return children;
@@ -37,6 +39,7 @@ export default function App() {
     <AuthProvider>
       <div className="min-h-screen bg-gray-50 text-gray-900">
         <Navbar />
+        <IncomingCallBanner />
         <main className="mx-auto flex w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <Routes>
             <Route path="/" element={<Home />} />

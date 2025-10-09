@@ -70,6 +70,40 @@ export function initSocket(httpServer, { corsOrigin }) {
       }
     });
 
+    // Notify a user of an incoming call invitation (out-of-band ring)
+    socket.on("call:ring", async ({ applicationId, targetUserId }) => {
+      try {
+        const check = await verifyCallAccess(applicationId, socket.user.id);
+        if (!check.ok || !targetUserId) return;
+        // send a ring to the target user's personal room
+        io.to(`user:${targetUserId}`).emit("call:ring", {
+          applicationId,
+          from: socket.user.id,
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    // Fallback: ring all authorized peers on the application (candidate, employer, team), excluding sender
+    socket.on("call:ring-app", async ({ applicationId }) => {
+      try {
+        const check = await verifyCallAccess(applicationId, socket.user.id);
+        if (!check.ok) return;
+        const app = check.application;
+        const candidateId = String(app.candidate);
+        const employerId = String(app.job?.employer || "");
+        const teamIds = (app.job?.team || []).map((x) => String(x));
+        const recipients = new Set([candidateId, employerId, ...teamIds]);
+        recipients.delete(String(socket.user.id));
+        recipients.forEach((uid) => {
+          io.to(`user:${uid}`).emit("call:ring", { applicationId, from: socket.user.id });
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+
     socket.on("code:join", async ({ sessionId }) => {
       try {
         const session = await CodingSession.findById(sessionId).lean();
@@ -207,11 +241,10 @@ export function initSocket(httpServer, { corsOrigin }) {
       });
     });
 
-    const forwardSignal = (eventName) => ({ applicationId, targetUserId, description, candidate }) => {
+    const forwardSignal = (eventName) => ({ applicationId, description, candidate }) => {
       const room = `call:${applicationId}`;
       if (!socket.data.callRooms.has(room)) return;
-      if (!targetUserId) return;
-      io.to(`user:${targetUserId}`).emit(eventName, {
+      io.to(room).except(socket.id).emit(eventName, {
         applicationId,
         from: socket.user.id,
         description,
