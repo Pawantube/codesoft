@@ -10,11 +10,15 @@ export default function EmployerManageJob() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(false);
   const [invites, setInvites] = useState({}); // appId -> { at, notes, sending }
+  const [statusFilter, setStatusFilter] = useState('');
+  const [taskModals, setTaskModals] = useState({}); // appId -> { open, title, description, dueAt, attachments(string) }
 
   const load = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/applications/employer', { params: { jobId: id } });
+      const params = { jobId: id };
+      if (statusFilter) params.status = statusFilter;
+      const response = await api.get('/applications/employer', { params });
       setApps(response.data || []);
     } finally {
       setLoading(false);
@@ -55,6 +59,69 @@ export default function EmployerManageJob() {
       alert(e?.response?.data?.error || 'Update failed');
     } finally {
       setInvites((p) => ({ ...p, [appId]: { ...(p[appId]||{}), sending: false } }));
+    }
+  };
+
+  const inviteNow = async (appId) => {
+    try {
+      await api.post(`/applications/${appId}/invite-now`);
+      alert('Invite sent');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to invite');
+    }
+  };
+
+  const download = async (application) => {
+    try {
+      // The API returns either a file or a JSON with {url}
+      const res = await api.get(`/applications/${application._id}/resume`, { responseType: 'blob' });
+      const contentType = res.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await res.data.text();
+        const json = JSON.parse(text);
+        if (json.url) {
+          window.open(json.url, '_blank', 'noopener');
+          return;
+        }
+      }
+      const blob = new Blob([res.data]);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(application.candidate?.name || application.name || 'resume').replace(/[^\w.-]+/g,'_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to download');
+    }
+  };
+
+  const openTaskModal = (appId) => setTaskModals((p) => ({ ...p, [appId]: { open: true, title: '', description: '', dueAt: '', attachments: '' } }));
+  const closeTaskModal = (appId) => setTaskModals((p) => ({ ...p, [appId]: { ...(p[appId]||{}), open: false } }));
+  const setTaskField = (appId, key, value) => setTaskModals((p) => ({ ...p, [appId]: { ...(p[appId]||{}), [key]: value } }));
+  const submitTask = async (appId) => {
+    const cur = taskModals[appId] || {};
+    if (!cur.title) { alert('Task title required'); return; }
+    const attachments = (cur.attachments || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((url) => ({ url }));
+    try {
+      await api.post(`/applications/${appId}/tasks`, {
+        title: cur.title,
+        description: cur.description || '',
+        dueAt: cur.dueAt || undefined,
+        attachments,
+      });
+      closeTaskModal(appId);
+      await load();
+      alert('Task assigned');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Failed to assign task');
     }
   };
 
@@ -114,6 +181,21 @@ export default function EmployerManageJob() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Applicants</h1>
 
+      <div className="flex items-center gap-2">
+        <label className="text-sm">Filter:</label>
+        <select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
+          <option value="">All</option>
+          <option value="submitted">Submitted</option>
+          <option value="reviewed">Reviewed</option>
+          <option value="on_hold">On hold</option>
+          <option value="shortlisted">Shortlisted</option>
+          <option value="task_assigned">Task assigned</option>
+          <option value="accepted">Accepted</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <button onClick={load} className="px-3 py-1 rounded border text-sm">Apply</button>
+      </div>
+
       {loading && <div className="text-sm text-gray-600">Loading…</div>}
 
       <div className="grid gap-3">
@@ -125,7 +207,8 @@ export default function EmployerManageJob() {
             null;
 
           return (
-            <div key={application._id} className="border rounded-xl bg-white p-4 flex flex-col gap-1">
+            <div key={application._id}>
+              <div className="border rounded-xl bg-white p-4 flex flex-col gap-1">
               <div className="font-semibold">
                 {application.candidate?.name || application.name}
                 <span className="text-xs ml-2 text-gray-600">{application.email}</span>
@@ -146,12 +229,9 @@ export default function EmployerManageJob() {
                   Download Resume
                 </button>
 
-                <button
-                  onClick={() => setStatus(application._id, 'accepted')}
-                  className="px-3 py-1 rounded bg-green-600 text-white"
-                >
-                  Accept
-                </button>
+                <button onClick={() => setStatus(application._id, 'on_hold')} className="px-3 py-1 rounded border">Hold</button>
+                <button onClick={() => setStatus(application._id, 'shortlisted')} className="px-3 py-1 rounded border">Shortlist</button>
+                <button onClick={() => setStatus(application._id, 'accepted')} className="px-3 py-1 rounded bg-green-600 text-white">Accept</button>
 
                 <button
                   onClick={() => setStatus(application._id, 'rejected')}
@@ -185,10 +265,53 @@ export default function EmployerManageJob() {
                 >
                   Start Video Call
                 </button>
+
+                <button onClick={() => inviteNow(application._id)} className="px-3 py-1 rounded bg-purple-100 text-purple-800 border">Invite Now</button>
+                <button onClick={() => openTaskModal(application._id)} className="px-3 py-1 rounded bg-amber-600 text-white">Assign Task</button>
               </div>
 
               {!hasResume && (
                 <div className="text-xs text-gray-500 mt-1">No resume uploaded for this application.</div>
+              )}
+              </div>
+              {/* Assign Task Modal */}
+              {taskModals[application._id]?.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                  <div className="w-full max-w-lg rounded-xl bg-white p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold">Assign Task</div>
+                      <button onClick={()=>closeTaskModal(application._id)} className="text-sm">Close</button>
+                    </div>
+                    <input
+                      className="w-full border rounded px-2 py-1"
+                      placeholder="Title"
+                      value={taskModals[application._id]?.title||''}
+                      onChange={(e)=>setTaskField(application._id,'title',e.target.value)}
+                    />
+                    <textarea
+                      className="w-full border rounded px-2 py-1 min-h-[80px]"
+                      placeholder="Description"
+                      value={taskModals[application._id]?.description||''}
+                      onChange={(e)=>setTaskField(application._id,'description',e.target.value)}
+                    />
+                    <input
+                      type="datetime-local"
+                      className="w-full border rounded px-2 py-1"
+                      value={taskModals[application._id]?.dueAt||''}
+                      onChange={(e)=>setTaskField(application._id,'dueAt',e.target.value)}
+                    />
+                    <textarea
+                      className="w-full border rounded px-2 py-1 min-h-[80px]"
+                      placeholder="Attachment URLs (one per line)"
+                      value={taskModals[application._id]?.attachments||''}
+                      onChange={(e)=>setTaskField(application._id,'attachments',e.target.value)}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={()=>closeTaskModal(application._id)} className="px-3 py-1 rounded border">Cancel</button>
+                      <button onClick={()=>submitTask(application._id)} className="px-3 py-1 rounded bg-amber-600 text-white">Assign</button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           );
@@ -201,9 +324,7 @@ export default function EmployerManageJob() {
           {apps
             .filter((app) => app.status === 'accepted')
             .map((app) => (
-              <li key={app._id}>
-                {app.candidate?.name || app.name} - {app.email}
-              </li>
+              <li key={app._id}>{app.candidate?.name || app.name} - {app.email}</li>
             ))}
         </ul>
       </div>

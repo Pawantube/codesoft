@@ -273,6 +273,25 @@ export function initSocket(httpServer, { corsOrigin }) {
     socket.on("call:answer", forwardSignal("call:answer"));
     socket.on("call:ice", forwardSignal("call:ice"));
 
+    // --- Phase 2: In-call collaboration events ---
+    socket.on("code:update", ({ applicationId, content }) => {
+      const room = `call:${applicationId}`;
+      if (!socket.data.callRooms.has(room)) return;
+      socket.to(room).emit("code:update", { from: socket.user.id, content });
+    });
+
+    socket.on("wb:stroke", ({ applicationId, stroke }) => {
+      const room = `call:${applicationId}`;
+      if (!socket.data.callRooms.has(room)) return;
+      socket.to(room).emit("wb:stroke", { from: socket.user.id, stroke });
+    });
+
+    socket.on("wb:clear", ({ applicationId }) => {
+      const room = `call:${applicationId}`;
+      if (!socket.data.callRooms.has(room)) return;
+      socket.to(room).emit("wb:clear", { from: socket.user.id });
+    });
+
     socket.on("disconnect", () => {
       const rooms = socket.data.callRooms || new Map();
       rooms.forEach((_meta, room) => {

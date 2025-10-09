@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, setAuthToken } from '../utils/api';
 import { ensurePushSubscription, removePushSubscription } from '../utils/push';
 import { initSocket, closeSocket } from '../utils/socket';
+import { showToast } from '../utils/toast';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -49,12 +50,22 @@ export default function AuthProvider({ children }) {
 
   // Socket + Push lifecycle
   useEffect(() => {
+    let socket;
     if (token && user) {
-      initSocket(token);
+      socket = initSocket(token);
+      // Foreground toast via socket
+      const onNotify = (evt) => {
+        const { title, message, link } = evt || {};
+        showToast({ title: title || 'Notification', message, link });
+      };
+      socket.on && socket.on('notify:new', onNotify);
       ensurePushSubscription(token).catch(() => {});
     } else {
       closeSocket();
     }
+    return () => {
+      try { socket && socket.off && socket.off('notify:new'); } catch {}
+    };
   }, [token, user]);
 
   // Ensure sockets close on unmount

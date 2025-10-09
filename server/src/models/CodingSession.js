@@ -9,6 +9,7 @@ const codingSessionSchema = new mongoose.Schema({
   prompt: { type: String },
   starterCode: { type: String, default: '' },
   code: { type: String, default: '' },
+  whiteboard: { type: String, default: '' }, // dataURL or JSON strokes
   status: { type: String, enum: ['active', 'completed'], default: 'active' },
   lastActivityAt: { type: Date, default: Date.now },
   runCount: { type: Number, default: 0 },

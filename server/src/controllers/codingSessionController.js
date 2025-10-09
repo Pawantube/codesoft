@@ -8,12 +8,25 @@ const ensureParticipant = (session, userId) => {
   return session.participants.map(String).includes(id);
 };
 
+export const updateWhiteboardSnapshot = async (req, res) => {
+  const { id } = req.params;
+  const { whiteboard } = req.body; // dataURL or JSON string
+  const session = await CodingSession.findById(id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!ensureParticipant(session, req.user._id)) return res.status(403).json({ error: 'Forbidden' });
+
+  session.whiteboard = typeof whiteboard === 'string' ? whiteboard : '';
+  session.lastActivityAt = new Date();
+  await session.save();
+  res.json({ ok: true });
+};
+
 const buildParticipants = (application) => {
   const participants = [application.candidate];
   if (application.job?.employer) participants.push(application.job.employer);
   const team = Array.isArray(application.job?.team) ? application.job.team : [];
   const ids = participants.concat(team).filter(Boolean).map((value) => String(value));
-  return [...new Set(ids)].map((value) => Types.ObjectId(value));
+  return [...new Set(ids)].map((value) => new Types.ObjectId(value));
 };
 
 const authorize = async ({ applicationId, userId }) => {

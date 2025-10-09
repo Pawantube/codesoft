@@ -23,6 +23,7 @@ import Channels from './pages/Channels';
 import Posts from './pages/Posts';
 import Interested from './pages/Interested';
 import AuthProvider, { useAuth } from './context/AuthContext';
+import Toaster from './components/Toaster.jsx';
 
 function Protected({ role, children }) {
   const { user, bootstrapping } = useAuth();
@@ -61,17 +62,13 @@ export default function App() {
             <Route path="/posts" element={<Protected><Posts /></Protected>} />
             <Route path="/chat" element={<Protected><ChatPage /></Protected>} />
             <Route path="/coding/:id" element={<Protected><LiveCoding /></Protected>} />
-            <Route path="/call/:id" element={<Protected><LiveCallPage /></Protected>} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
         <footer className="py-6 text-center text-sm text-gray-500">� {year} SawConnect Job Board</footer>
         <InstallPromptBanner />
+        <Toaster />
       </div>
     </AuthProvider>
   );
 }
-
-
-
-

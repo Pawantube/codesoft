@@ -25,3 +25,23 @@ export const sendWebPush = async ({ subscription, payload }) => {
     }
   }
 };
+
+export const sendWebPushToUser = async ({ userId, payload }) => {
+  if (!hasWebPushConfig) return;
+  try {
+    const subs = await PushSubscription.find({ user: userId }).lean();
+    await Promise.all(
+      subs.map((s) =>
+        sendWebPush({
+          subscription: {
+            endpoint: s.endpoint,
+            keys: { p256dh: s.keys.p256dh, auth: s.keys.auth },
+          },
+          payload,
+        })
+      )
+    );
+  } catch (e) {
+    // non-fatal
+  }
+};

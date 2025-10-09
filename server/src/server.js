@@ -24,6 +24,8 @@ import interestRoutes from './routes/interestRoutes.js';
 import codingSessionRoutes from './routes/codingSessionRoutes.js';
 import mediaRoutes from './routes/mediaRoutes.js';
 import postRoutes from './routes/postRoutes.js';
+import screeningRoutes from './routes/screeningRoutes.js';
+import interviewRoutes from './routes/interviewRoutes.js';
 import { initSocket } from './socket.js';
 console.log(process.env.cloudinary_url)
 // ESM dirname
@@ -112,6 +114,8 @@ app.use('/api/interests', interestRoutes);
 app.use('/api/coding-sessions', codingSessionRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/screenings', screeningRoutes);
+app.use('/api/interview', interviewRoutes);
 
 // chat routes AFTER io attach
 import chatRoutes from './routes/chatRoutes.js';

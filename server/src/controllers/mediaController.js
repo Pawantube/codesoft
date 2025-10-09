@@ -36,3 +36,32 @@ export const uploadAvatar = async (req, res) => {
     return res.status(500).json({ error: 'Avatar upload failed', details: e?.message });
   }
 };
+
+export const uploadTaskAttachment = async (req, res) => {
+  if (!req.user?._id) return res.status(401).json({ error: 'Unauthorized' });
+  if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'No file provided' });
+
+  const uploadFromBuffer = (fileBuffer, filename) =>
+    new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          resource_type: 'raw',
+          folder: 'sawconnect/task-attachments',
+          filename_override: filename,
+          use_filename: true,
+        },
+        (err, result) => {
+          if (err) return reject(err);
+          return resolve(result);
+        }
+      );
+      stream.end(fileBuffer);
+    });
+
+  try {
+    const up = await uploadFromBuffer(req.file.buffer, req.file.originalname || 'attachment');
+    return res.status(201).json({ url: up.secure_url, bytes: up.bytes, format: up.format });
+  } catch (e) {
+    return res.status(500).json({ error: 'Attachment upload failed', details: e?.message });
+  }
+};
