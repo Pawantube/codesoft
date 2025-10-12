@@ -5,11 +5,32 @@ const { WEB_PUSH_PUBLIC_KEY, WEB_PUSH_PRIVATE_KEY, FROM_EMAIL } = process.env;
 
 const contactEmail = FROM_EMAIL?.match(/<([^>]+)>/)?.[1] || FROM_EMAIL || 'no-reply@sawconnect.app';
 
-if (WEB_PUSH_PUBLIC_KEY && WEB_PUSH_PRIVATE_KEY) {
-  webpush.setVapidDetails(`mailto:${contactEmail}`, WEB_PUSH_PUBLIC_KEY, WEB_PUSH_PRIVATE_KEY);
+// Ensure keys are URL-safe Base64 (replace +/ with -_ and strip =) as required by web-push
+const toUrlSafeB64 = (s) => (s || '')
+  .trim()
+  .replace(/\s+/g, '')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/g, '');
+
+let vapidConfigured = false;
+try {
+  if (WEB_PUSH_PUBLIC_KEY && WEB_PUSH_PRIVATE_KEY) {
+    const pub = toUrlSafeB64(WEB_PUSH_PUBLIC_KEY);
+    const prv = toUrlSafeB64(WEB_PUSH_PRIVATE_KEY);
+    const urlSafeRe = /^[A-Za-z0-9_-]+$/;
+    if (urlSafeRe.test(pub) && urlSafeRe.test(prv)) {
+      webpush.setVapidDetails(`mailto:${contactEmail}`, pub, prv);
+      vapidConfigured = true;
+    } else {
+      console.warn('[WebPush] VAPID keys not URL-safe after normalization. Web push disabled.');
+    }
+  }
+} catch (e) {
+  console.warn('[WebPush] Failed to initialize VAPID. Web push disabled.', e?.message || e);
 }
 
-export const hasWebPushConfig = Boolean(WEB_PUSH_PUBLIC_KEY && WEB_PUSH_PRIVATE_KEY);
+export const hasWebPushConfig = Boolean(vapidConfigured);
 
 export const sendWebPush = async ({ subscription, payload }) => {
   if (!hasWebPushConfig) return;
