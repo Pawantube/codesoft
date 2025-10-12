@@ -49,14 +49,41 @@ export function initSocket(httpServer, { corsOrigin }) {
     const redisUrl = process.env.REDIS_URL;
     if (redisUrl) {
       const useTls = String(redisUrl).startsWith("rediss://");
-      const redisOpts = useTls ? { tls: {} } : {};
+      const urlObj = new URL(redisUrl.replace(/^rediss?\:\/\//, 'http://'));
+      const servername = urlObj.hostname;
+      const baseOpts = {
+        lazyConnect: true,
+        maxRetriesPerRequest: 0, // don't bubble fatal error
+        enableOfflineQueue: false,
+      };
+      const redisOpts = useTls ? { ...baseOpts, tls: { servername } } : baseOpts;
+
       const pub = new Redis(redisUrl, redisOpts);
       const sub = new Redis(redisUrl, redisOpts);
       pub.on("error", (e) => console.error("[Redis] pub error:", e?.message || e));
       sub.on("error", (e) => console.error("[Redis] sub error:", e?.message || e));
+
+      // Explicitly connect with a timeout; only attach adapter if both ready
+      const connectWithTimeout = (client, ms) => new Promise((resolve, reject) => {
+        let done = false;
+        const t = setTimeout(() => { if (!done) { done = true; reject(new Error("connect timeout")); } }, ms);
+        client.connect().then(() => { if (!done) { done = true; clearTimeout(t); resolve(); } })
+          .catch((err) => { if (!done) { done = true; clearTimeout(t); reject(err); } });
+      });
+
       const requestsTimeout = Number(process.env.SIO_REQUESTS_TIMEOUT_MS || 8000);
-      io.adapter(createAdapter(pub, sub, { requestsTimeout }));
-      console.log(`✅ Socket.io Redis adapter enabled (requestsTimeout=${requestsTimeout}ms)`);
+      const connectTimeout = Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 5000);
+      Promise.all([
+        connectWithTimeout(pub, connectTimeout),
+        connectWithTimeout(sub, connectTimeout),
+      ])
+        .then(() => {
+          io.adapter(createAdapter(pub, sub, { requestsTimeout }));
+          console.log(`✅ Socket.io Redis adapter enabled (requestsTimeout=${requestsTimeout}ms)`);
+        })
+        .catch((e) => {
+          console.error("⚠️ Redis not available, proceeding without cluster adapter:", e?.message || e);
+        });
     } else {
       console.log("ℹ️ REDIS_URL not set - Socket.io running without cluster adapter");
     }
