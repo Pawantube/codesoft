@@ -1,6 +1,7 @@
 // server/src/server.js
 import dotenv from 'dotenv';
 dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -31,13 +32,18 @@ import matchRoutes from './routes/matchRoutes.js';
 import recommendationsRoutes from './routes/recommendationsRoutes.js';
 import resumeRoutes from './routes/resumeRoutes.js';
 import moderationRoutes from './routes/moderationRoutes.js';
+import turnRoutes from './routes/turnRoutes.js'; // exposes GET /credentials
 import { initSocket } from './socket.js';
-console.log(process.env.cloudinary_url)
-// ESM dirname
+
+// Optional debug logs (keep or remove)
+console.log(process.env.cloudinary_url);
+console.log(process.env.CLOUDINARY_CLOUD_NAME);
+
+// --- ESM dirname helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Resolve uploads dir (supports server/uploads and <repo>/uploads)
+// --- Resolve uploads dir (supports server/uploads and <repo>/uploads)
 const candidates = [
   path.resolve(__dirname, '../uploads'),
   path.resolve(__dirname, '../../uploads'),
@@ -50,29 +56,35 @@ if (!UPLOADS_DIR) {
 const VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
 fs.mkdirSync(VIDEOS_DIR, { recursive: true });
 
+// --- DB
 await connectDB();
-console.log(process.env.CLOUDINARY_CLOUD_NAME);
+
 const app = express();
 const server = http.createServer(app);
 
+// If behind a proxy (Render/Heroku/NGINX), enable correct IPs for rate-limit
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 5000;
+
 // Support multiple client origins in production (comma-separated)
 const CLIENT_URLS = (process.env.CLIENT_URLS || process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-// socket.io
+// --- socket.io
 const io = initSocket(server, { corsOrigin: CLIENT_URLS });
 app.use((req, _res, next) => { req.io = io; next(); });
 
-// security + logs
+// --- security + logs
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(morgan('dev'));
 
-// CORS
+// --- CORS
 app.use(cors({ origin: CLIENT_URLS, credentials: true }));
 
+// --- parsers
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 
@@ -92,7 +104,7 @@ app.get('/uploads/videos/:filename', (req, res, next) => {
   });
 });
 
-// PUBLIC static: /uploads (once, with headers)
+// --- PUBLIC static: /uploads (with headers)
 app.use('/uploads', express.static(UPLOADS_DIR, {
   setHeaders(res) {
     // Static assets don't need credentials; allow any origin for videos/images
@@ -102,11 +114,11 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
   },
 }));
 
-// rate limit
+// --- rate limit
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
-// routes
+// --- routes
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
@@ -128,17 +140,21 @@ app.use('/api/recommendations', recommendationsRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/moderate', moderationRoutes);
 
+// TURN creds route (expects routes/turnRoutes.js to define GET /credentials)
+app.use('/api/turn', turnRoutes);
+
 // chat routes AFTER io attach
 import chatRoutes from './routes/chatRoutes.js';
 app.use('/api/chat', chatRoutes);
 
-// errors
+// --- errors
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(err.status || 500).json({ error: err.message || 'Server error' });
 });
 
+// --- start
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Serving uploads from: ${UPLOADS_DIR}`);

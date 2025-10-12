@@ -1,1 +1,22 @@
-@tailwind base;@tailwind components;@tailwind utilities;body{@apply bg-gray-50 text-gray-900}.container{@apply max-w-6xl mx-auto px-3 sm:px-4 lg:px-6}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+.container {
+  @apply max-w-6xl mx-auto px-3 sm:px-4 lg:px-6;
+}
+/* Hide scrollbars utility for horizontal tab bar on mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+/* Improve text rendering across platforms */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

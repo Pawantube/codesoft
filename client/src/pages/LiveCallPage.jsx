@@ -6,14 +6,23 @@ import { api } from '../utils/api';
 import { showToast } from '../utils/toast';
 import Editor from '@monaco-editor/react';
 
-// Minimal 1:1 WebRTC call page with screenshare, signaled via socket.io
+// Inline client-side defaults (PUBLIC values only)
+// Do NOT place server secrets in the client.
+const CLIENT_ENV = {
+  // Keep this false by default — client should not call Metered directly with a key.
+  VITE_ENABLE_METERED: (import.meta.env.VITE_ENABLE_METERED ?? 'false'),
+  VITE_METERED_SUBDOMAIN: (import.meta.env.VITE_METERED_SUBDOMAIN ?? ''),
+  VITE_METERED_API_KEY: (import.meta.env.VITE_METERED_API_KEY ?? ''),
+  VITE_API_URL: (import.meta.env.VITE_API_URL ?? 'http://localhost:5000'),
+};
+
 export default function LiveCallPage() {
   const { id: applicationId } = useParams();
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
   const [error, setError] = useState('');
-  const [ready, setReady] = useState(false); // joined and media ready
+  const [ready, setReady] = useState(false);
   const [joining, setJoining] = useState(false);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
@@ -24,7 +33,7 @@ export default function LiveCallPage() {
   const [notes, setNotes] = useState([]);
   const [noteText, setNoteText] = useState('');
   const [noteTag, setNoteTag] = useState('general'); // 'general' | 'strength' | 'concern' | 'next_step'
-  const [noteFilter, setNoteFilter] = useState('all'); // 'all' + tags
+  const [noteFilter, setNoteFilter] = useState('all');
   const [transcriptText, setTranscriptText] = useState('');
   const [summaryText, setSummaryText] = useState('');
   const [savingTranscript, setSavingTranscript] = useState(false);
@@ -33,112 +42,42 @@ export default function LiveCallPage() {
   const [calendarMeta, setCalendarMeta] = useState(null);
   const [recording, setRecording] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
   const audioMixContextRef = useRef(null);
   const audioDestRef = useRef(null);
+  const transcriptSaveTimer = useRef(null);
+  const codeSaveTimer = useRef(null);
+  const wbSaveTimer = useRef(null);
+
+  const joinRef = useRef(null);
+  const joinCleanupRef = useRef(null);
 
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const otherUserIdRef = useRef(null); // kept for compatibility but no longer required for signaling
+  const otherUserIdRef = useRef(null);
+
+  // Perfect negotiation refs
   const roleRef = useRef('participant');
   const politeRef = useRef(true);
   const makingOfferRef = useRef(false);
   const ignoreOfferRef = useRef(false);
   const settingRemoteAnswerPendingRef = useRef(false);
   const pendingIceRef = useRef([]);
+
+  // Whiteboard
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef({ x: 0, y: 0 });
 
+  // Init socket once token available
   useEffect(() => { if (token) initSocket(token); }, [token]);
 
-  useEffect(() => {
-    let isActive = true;
-    let teardown = () => {};
-
-    const setupLiveCall = async () => {
-      const socket = getSocket();
-      if (!socket) throw new Error('Socket not connected');
-
-      const getIceServers = async () => {
-        // 1) Try Metered dynamic credentials if provided
-        const sub = import.meta.env.VITE_METERED_SUBDOMAIN;
-        const key = import.meta.env.VITE_METERED_API_KEY;
-        if (sub && key) {
-          try {
-            const url = `https://${sub}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(key)}`;
-            const res = await fetch(url, { method: 'GET' });
-            if (res.ok) {
-              const data = await res.json().catch(() => ({}));
-              if (Array.isArray(data.iceServers) && data.iceServers.length) {
-                return data.iceServers;
-              }
-            }
-          } catch {}
-        }
-
-        // 2) Fallback to in-house env lists
-        const STUN_URLS = (import.meta.env.VITE_STUN_URLS || '').split(',').map(s=>s.trim()).filter(Boolean);
-        const TURN_URLS = (import.meta.env.VITE_TURN_URLS || import.meta.env.VITE_TURN_URL || '').split(',').map(s=>s.trim()).filter(Boolean);
-        const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME;
-        const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL;
-        const iceServers = [];
-        if (STUN_URLS.length) STUN_URLS.forEach(u=> iceServers.push({ urls: u }));
-        else iceServers.push({ urls: 'stun:stun.l.google.com:19302' });
-        if (TURN_URLS.length && TURN_USERNAME && TURN_CREDENTIAL) {
-          TURN_URLS.forEach(u=> iceServers.push({ urls: u, username: TURN_USERNAME, credential: TURN_CREDENTIAL }));
-        }
-        return iceServers;
-      };
-  // Debounced autosave for transcript
-  const transcriptSaveTimer = useRef(null);
-  useEffect(() => {
-    if (!transcriptText) return; // avoid saving empty on first load
-    if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current);
-    transcriptSaveTimer.current = setTimeout(async () => {
-      try {
-        await api.post(`/interview/${applicationId}/transcript`, { transcriptText });
-        setTranscriptSavedAt(new Date());
-      } catch {}
-    }, 1200);
-    return () => { if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current); };
-  }, [transcriptText, applicationId]);
-
-      const join = async () => {
-        setJoining(true);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          localStreamRef.current = stream;
-          if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-          const iceServers = await getIceServers();
-          const pc = new RTCPeerConnection({ iceServers });
-          pcRef.current = pc;
-          stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-
-          pc.onicecandidate = (e) => {
-            if (e.candidate) {
-              socket.emit('call:ice', { applicationId, candidate: e.candidate });
-            }
-          };
-
-          pc.onnegotiationneeded = async () => {
-            try {
-              makingOfferRef.current = true;
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              socket.emit('call:offer', { applicationId, description: pc.localDescription });
-            } catch (e) {
-              // swallow
-            } finally {
-              makingOfferRef.current = false;
-            }
-          };
-
-  // --- Recording helpers ---
+  // ---------- Recording helpers (top-level; NOT inside join) ----------
   const buildMixedAudioStream = () => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -153,15 +92,30 @@ export default function LiveCallPage() {
         const src = ctx.createMediaStreamSource(stream);
         src.connect(dest);
       };
+
       // local mic
       if (localStreamRef.current) addSrc(localStreamRef.current);
-      // remote audio from remote video element
+      // remote audio (if any)
       const remoteStream = remoteVideoRef.current?.srcObject;
       if (remoteStream) addSrc(remoteStream);
 
       return dest.stream;
     } catch {
       return null;
+    }
+  };
+
+  const uploadAudioBlob = async (blob, filename = 'audio.webm') => {
+    try {
+      setUploadingAudio(true);
+      const fd = new FormData();
+      fd.append('audio', blob, filename);
+      const res = await api.post(`/interview/${applicationId}/transcribe`, fd);
+      if (res?.data?.transcriptText) setTranscriptText(res.data.transcriptText);
+    } catch (e) {
+      showToast({ title: 'Transcription failed', message: e?.response?.data?.error || 'Please try again.' });
+    } finally {
+      setUploadingAudio(false);
     }
   };
 
@@ -180,29 +134,17 @@ export default function LiveCallPage() {
       };
       mr.start(250);
       setRecording(true);
-    } catch (e) {
+    } catch {
       showToast({ title: 'Recording failed', message: 'Try again or upload audio manually.' });
     }
   };
+
   const stopRecording = () => {
     try { mediaRecorderRef.current?.stop(); } catch {}
     setRecording(false);
     try { audioMixContextRef.current?.close(); } catch {}
-    audioMixContextRef.current = null; audioDestRef.current = null;
-  };
-
-  const uploadAudioBlob = async (blob, filename='audio.webm') => {
-    try {
-      setUploadingAudio(true);
-      const fd = new FormData();
-      fd.append('audio', blob, filename);
-      const res = await api.post(`/interview/${applicationId}/transcribe`, fd);
-      if (res?.data?.transcriptText) setTranscriptText(res.data.transcriptText);
-    } catch (e) {
-      showToast({ title: 'Transcription failed', message: e?.response?.data?.error || 'Please try again.' });
-    } finally {
-      setUploadingAudio(false);
-    }
+    audioMixContextRef.current = null;
+    audioDestRef.current = null;
   };
 
   const onAudioFilePick = async (e) => {
@@ -211,161 +153,22 @@ export default function LiveCallPage() {
     if (!file) return;
     await uploadAudioBlob(file, file.name || 'audio.webm');
   };
-          pc.ontrack = (e) => {
-            const [remote] = e.streams;
-            if (remoteVideoRef.current && remote) remoteVideoRef.current.srcObject = remote;
-          };
+  // -------------------------------------------------------------------
 
-          const maybeNegotiate = async () => {
-            const pc = pcRef.current;
-            if (!pc) return;
-            if (pc.signalingState !== 'stable') return;
-            try {
-              makingOfferRef.current = true;
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              socket.emit('call:offer', { applicationId, description: pc.localDescription });
-            } catch {}
-            finally { makingOfferRef.current = false; }
-          };
+  // Debounced autosave for transcript
+  useEffect(() => {
+    if (!transcriptText) return;
+    if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current);
+    transcriptSaveTimer.current = setTimeout(async () => {
+      try {
+        await api.post(`/interview/${applicationId}/transcript`, { transcriptText });
+        setTranscriptSavedAt(new Date());
+      } catch {}
+    }, 1200);
+    return () => { if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current); };
+  }, [transcriptText, applicationId]);
 
-          const onParticipants = ({ participants, role }) => {
-            // Use server-provided role to set polite side deterministically
-            roleRef.current = role || roleRef.current;
-            politeRef.current = roleRef.current === 'employer' || roleRef.current === 'team';
-            // If someone else is present now, ensure an offer is sent at least once
-            const me = user?._id;
-            const others = (participants||[]).filter((p)=>String(p.userId)!==String(me));
-            if (others.length) { maybeNegotiate(); }
-          };
-          const onPeerJoined = () => { maybeNegotiate(); };
-          const onPeerLeft = () => { otherUserIdRef.current = null; };
-          const drainPendingIce = async () => {
-            const pc = pcRef.current;
-            const list = pendingIceRef.current;
-            pendingIceRef.current = [];
-            for (const cand of list) {
-              try { await pc.addIceCandidate(cand); } catch {}
-            }
-          };
-
-          const onOffer = async ({ from, description }) => {
-            otherUserIdRef.current = from || null;
-            const pc = pcRef.current;
-            const offerCollision = makingOfferRef.current || settingRemoteAnswerPendingRef.current;
-            ignoreOfferRef.current = !politeRef.current && offerCollision;
-            if (ignoreOfferRef.current) return;
-            try {
-              if (offerCollision) {
-                await Promise.resolve(); // allow state to settle
-              }
-              await pc.setRemoteDescription(description);
-              const answer = await pc.createAnswer();
-              settingRemoteAnswerPendingRef.current = true;
-              await pc.setLocalDescription(answer);
-              socket.emit('call:answer', { applicationId, description: pc.localDescription });
-              await drainPendingIce();
-            } catch (e) {
-              // swallow
-            } finally {
-              settingRemoteAnswerPendingRef.current = false;
-            }
-          };
-          const onAnswer = async ({ description }) => {
-            const pc = pcRef.current;
-            // Only accept an answer if we are in have-local-offer state
-            if (pc.signalingState !== 'have-local-offer') {
-              return; // stale or out-of-order answer
-            }
-            try {
-              await pc.setRemoteDescription(description);
-              await drainPendingIce();
-            } catch {}
-          };
-          const onIce = async ({ candidate }) => {
-            const pc = pcRef.current;
-            try {
-              if (!pc.remoteDescription) {
-                pendingIceRef.current.push(candidate);
-              } else {
-                await pc.addIceCandidate(candidate);
-              }
-            } catch {}
-          };
-          const onCode = ({ content }) => { setCode(String(content ?? '')); };
-          const onWbStroke = ({ stroke }) => { drawStroke(stroke); };
-          const onWbClear = () => { clearCanvas(); };
-          const onError = ({ error: err }) => setError(err || 'Call error');
-
-          socket.on('call:participants', onParticipants);
-          socket.on('call:peer-joined', onPeerJoined);
-          socket.on('call:peer-left', onPeerLeft);
-          socket.on('call:offer', onOffer);
-          socket.on('call:answer', onAnswer);
-          socket.on('call:ice', onIce);
-          socket.on('call:error', onError);
-          socket.on('code:update', onCode);
-          socket.on('wb:stroke', onWbStroke);
-          socket.on('wb:clear', onWbClear);
-
-          const cleanup = () => {
-            socket.off('call:participants', onParticipants);
-            socket.off('call:peer-joined', onPeerJoined);
-            socket.off('call:peer-left', onPeerLeft);
-            socket.off('call:offer', onOffer);
-            socket.off('call:answer', onAnswer);
-            socket.off('call:ice', onIce);
-            socket.off('call:error', onError);
-            socket.off('code:update', onCode);
-            socket.off('wb:stroke', onWbStroke);
-            socket.off('wb:clear', onWbClear);
-          };
-
-          socket.emit('call:join', { applicationId });
-          setReady(true);
-          // ring all authorized peers on this application so they get the banner
-          try { socket.emit('call:ring-app', { applicationId }); } catch {}
-
-          // return cleanup function for listeners
-          return cleanup;
-        } catch (err) {
-          setError(err?.message || 'Failed to access camera/mic');
-        } finally {
-          setJoining(false);
-        }
-      };
-
-      // expose join for potential retries
-      window.__joinCall = join;
-      // auto-join immediately and return its cleanup
-      const cleanup = await join();
-      return cleanup;
-    };
-
-    const maybeSetTeardown = (res) => {
-      if (!isActive) return;
-      if (typeof res === 'function') teardown = res;
-      else if (res && typeof res.cleanup === 'function') teardown = res.cleanup;
-    };
-
-    try {
-      const result = setupLiveCall?.();
-      if (result && typeof result.then === 'function') {
-        result.then(maybeSetTeardown).catch(() => {});
-      } else {
-        maybeSetTeardown(result);
-      }
-    } catch (e) {
-      setError(e?.message || 'Failed to start call');
-    }
-
-    return () => {
-      isActive = false;
-      try { teardown(); } catch {}
-    };
-  }, [applicationId, user?._id]);
-
-  // Calendar meta for deep-links
+  // Calendar meta
   useEffect(() => {
     const loadMeta = async () => {
       try {
@@ -389,7 +192,7 @@ export default function LiveCallPage() {
     `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(calendarMeta.title||'Interview')}&body=${encodeURIComponent(calendarMeta.description||'')}&startdt=${encodeURIComponent(calendarMeta.at||'')}&enddt=${encodeURIComponent(calendarMeta.end||'')}&location=${encodeURIComponent(calendarMeta.location||'')}`
     : null;
 
-  // --- Code editor emit ---
+  // Code editor emit
   const emitCode = (next) => {
     setCode(next);
     try { getSocket()?.emit('code:update', { applicationId, content: next }); } catch {}
@@ -402,12 +205,10 @@ export default function LiveCallPage() {
     const s = res.data || {};
     setSessionId(String(s._id || ''));
     if (typeof s.code === 'string') setCode(s.code);
-    // Whiteboard snapshot will be loaded upon switching to tab
     return String(s._id || '');
   };
 
   // Debounce-persist code to server when on Code tab
-  const codeSaveTimer = useRef(null);
   useEffect(() => {
     if (tab !== 'code' || !sessionId) return;
     if (codeSaveTimer.current) clearTimeout(codeSaveTimer.current);
@@ -417,7 +218,7 @@ export default function LiveCallPage() {
     return () => { if (codeSaveTimer.current) clearTimeout(codeSaveTimer.current); };
   }, [code, tab, sessionId]);
 
-  // --- Whiteboard helpers ---
+  // Whiteboard helpers
   const getCtx = () => canvasRef.current?.getContext('2d') || null;
   const clearCanvas = () => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -432,7 +233,10 @@ export default function LiveCallPage() {
       const snap = res.data?.whiteboard;
       if (snap && typeof snap === 'string') {
         const img = new Image();
-        img.onload = () => { const ctx = getCtx(); if (!ctx) return; ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height); };
+        img.onload = () => {
+          const ctx = getCtx(); if (!ctx) return;
+          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        };
         img.src = snap;
       }
     } catch {}
@@ -462,8 +266,11 @@ export default function LiveCallPage() {
     lastPointRef.current = p;
   };
   const onCanvasUp = () => { drawingRef.current = false; };
-  const onClearBoard = () => { clearCanvas(); try { getSocket()?.emit('wb:clear', { applicationId }); } catch {} scheduleSaveWhiteboard(true); };
-  const wbSaveTimer = useRef(null);
+  const onClearBoard = () => {
+    clearCanvas();
+    try { getSocket()?.emit('wb:clear', { applicationId }); } catch {}
+    scheduleSaveWhiteboard(true);
+  };
   const scheduleSaveWhiteboard = (immediate = false) => {
     if (!sessionId) return;
     if (wbSaveTimer.current) clearTimeout(wbSaveTimer.current);
@@ -484,7 +291,7 @@ export default function LiveCallPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // --- Notes / Transcript API ---
+  // Notes / Transcript API
   const loadInterviewRecord = async () => {
     try {
       const res = await api.get(`/interview/${applicationId}`);
@@ -546,18 +353,245 @@ export default function LiveCallPage() {
     } catch {}
   };
 
+  // --------- ICE Servers helper (client tries server first) ----------
+  const getIceServers = async () => {
+    // 1) Try secure server proxy first (uses server-side secret)
+    try {
+      const res = await api.get('/turn/credentials'); // baseURL probably already /api
+      if (Array.isArray(res.data?.iceServers) && res.data.iceServers.length) {
+        try { console.log('[ICE] Using server-proxied iceServers:', res.data.iceServers.map(x=>x.urls)); } catch {}
+        return res.data.iceServers;
+      }
+    } catch (e) {
+      try { console.warn('[ICE] Proxy /turn/credentials failed'); } catch {}
+    }
+
+    // 2) Optional Metered direct (only if explicitly enabled and key present)
+    const ENABLE_METERED = String(CLIENT_ENV.VITE_ENABLE_METERED ?? 'false').toLowerCase() === 'true';
+    const sub = CLIENT_ENV.VITE_METERED_SUBDOMAIN;
+    const key = CLIENT_ENV.VITE_METERED_API_KEY;
+    const hasKey = Boolean(key);
+
+    if (ENABLE_METERED && sub && hasKey) {
+      try {
+        const url = `https://${sub}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(key)}`;
+        const res = await fetch(url, { method: 'GET' });
+        try { console.log('[ICE] Metered direct status:', res.status); } catch {}
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (Array.isArray(data.iceServers) && data.iceServers.length) {
+            try { console.log('[ICE] Using Metered direct iceServers:', data.iceServers.map(x=>x.urls)); } catch {}
+            return data.iceServers;
+          }
+        } else if (res.status === 401) {
+          showToast?.({ title: 'TURN auth failed', message: 'Metered 401 from frontend. Prefer server proxy.' });
+        }
+      } catch {}
+    }
+
+    // 3) Fallback ENV (STUN/TURN) or default STUN
+    const STUN_URLS = (import.meta.env.VITE_STUN_URLS || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const TURN_URLS = (import.meta.env.VITE_TURN_URLS || import.meta.env.VITE_TURN_URL || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME;
+    const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL;
+    const iceFromEnv = [];
+    if (STUN_URLS.length) STUN_URLS.forEach(u=> iceFromEnv.push({ urls: u }));
+    else iceFromEnv.push({ urls: 'stun:stun.l.google.com:19302' });
+    if (TURN_URLS.length && TURN_USERNAME && TURN_CREDENTIAL) {
+      TURN_URLS.forEach(u=> iceFromEnv.push({ urls: u, username: TURN_USERNAME, credential: TURN_CREDENTIAL }));
+    }
+    try { console.log('[ICE] Using env ICE (STUN/TURN):', iceFromEnv.map(x=>x.urls)); } catch {}
+    return iceFromEnv;
+  };
+  // -------------------------------------------------------------------
+
+  // Join / signaling
+  useEffect(() => {
+    // Prepare join function for user gesture
+    const join = async () => {
+      setJoining(true);
+      try {
+        // If user re-joins, remove old listeners first
+        try { joinCleanupRef.current?.(); } catch {}
+        joinCleanupRef.current = null;
+
+        const socket = getSocket();
+        if (!socket) throw new Error('Socket not connected');
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localStreamRef.current = stream;
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+        const iceServers = await getIceServers();
+        const pc = new RTCPeerConnection({ iceServers });
+        pcRef.current = pc;
+
+        // Add local tracks
+        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+        // ICE
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            socket.emit('call:ice', { applicationId, candidate: e.candidate });
+          }
+        };
+
+        // Perfect negotiation
+        pc.onnegotiationneeded = async () => {
+          try {
+            makingOfferRef.current = true;
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('call:offer', { applicationId, description: pc.localDescription });
+          } catch {} finally {
+            makingOfferRef.current = false;
+          }
+        };
+
+        pc.ontrack = (e) => {
+          const [remote] = e.streams;
+          if (remoteVideoRef.current && remote) remoteVideoRef.current.srcObject = remote;
+        };
+
+        const maybeNegotiate = async () => {
+          const pc = pcRef.current;
+          if (!pc) return;
+          if (pc.signalingState !== 'stable') return;
+          try {
+            makingOfferRef.current = true;
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('call:offer', { applicationId, description: pc.localDescription });
+          } catch {} finally { makingOfferRef.current = false; }
+        };
+
+        const drainPendingIce = async () => {
+          const pc = pcRef.current;
+          const list = pendingIceRef.current;
+          pendingIceRef.current = [];
+          for (const cand of list) {
+            try { await pc.addIceCandidate(cand); } catch {}
+          }
+        };
+
+        // Socket handlers
+        const onParticipants = ({ participants, role }) => {
+          roleRef.current = role || roleRef.current;
+          politeRef.current = roleRef.current === 'employer' || roleRef.current === 'team';
+          const me = user?._id;
+          const others = (participants||[]).filter((p)=>String(p.userId)!==String(me));
+          if (others.length) { maybeNegotiate(); }
+        };
+        const onPeerJoined = () => { maybeNegotiate(); };
+        const onPeerLeft = () => { otherUserIdRef.current = null; };
+
+        const onOffer = async ({ from, description }) => {
+          otherUserIdRef.current = from || null;
+          const offerCollision = makingOfferRef.current || settingRemoteAnswerPendingRef.current;
+          ignoreOfferRef.current = !politeRef.current && offerCollision;
+          if (ignoreOfferRef.current) return;
+          try {
+            if (offerCollision) await Promise.resolve();
+            await pc.setRemoteDescription(description);
+            const answer = await pc.createAnswer();
+            settingRemoteAnswerPendingRef.current = true;
+            await pc.setLocalDescription(answer);
+            socket.emit('call:answer', { applicationId, description: pc.localDescription });
+            await drainPendingIce();
+          } catch {} finally {
+            settingRemoteAnswerPendingRef.current = false;
+          }
+        };
+
+        const onAnswer = async ({ description }) => {
+          const pc = pcRef.current;
+          if (pc.signalingState !== 'have-local-offer') return;
+          try {
+            await pc.setRemoteDescription(description);
+            await drainPendingIce();
+          } catch {}
+        };
+
+        const onIce = async ({ candidate }) => {
+          const pc = pcRef.current;
+          try {
+            if (!pc.remoteDescription) {
+              pendingIceRef.current.push(candidate);
+            } else {
+              await pc.addIceCandidate(candidate);
+            }
+          } catch {}
+        };
+
+        const onCode = ({ content }) => { setCode(String(content ?? '')); };
+        const onWbStroke = ({ stroke }) => { drawStroke(stroke); };
+        const onWbClear = () => { clearCanvas(); };
+        const onError = ({ error: err }) => setError(err || 'Call error');
+
+        socket.on('call:participants', onParticipants);
+        socket.on('call:peer-joined', onPeerJoined);
+        socket.on('call:peer-left', onPeerLeft);
+        socket.on('call:offer', onOffer);
+        socket.on('call:answer', onAnswer);
+        socket.on('call:ice', onIce);
+        socket.on('call:error', onError);
+        socket.on('code:update', onCode);
+        socket.on('wb:stroke', onWbStroke);
+        socket.on('wb:clear', onWbClear);
+
+        const cleanup = () => {
+          try {
+            socket.off('call:participants', onParticipants);
+            socket.off('call:peer-joined', onPeerJoined);
+            socket.off('call:peer-left', onPeerLeft);
+            socket.off('call:offer', onOffer);
+            socket.off('call:answer', onAnswer);
+            socket.off('call:ice', onIce);
+            socket.off('call:error', onError);
+            socket.off('code:update', onCode);
+            socket.off('wb:stroke', onWbStroke);
+            socket.off('wb:clear', onWbClear);
+          } catch {}
+        };
+
+        joinCleanupRef.current = cleanup;
+
+        socket.emit('call:join', { applicationId });
+        setReady(true);
+        try { socket.emit('call:ring-app', { applicationId }); } catch {}
+      } catch (err) {
+        setError(err?.message || 'Failed to access camera/mic');
+      } finally {
+        setJoining(false);
+      }
+    };
+
+    window.__joinCall = join;
+    joinRef.current = join;
+
+    return () => { /* nothing; we clean up on leave/unmount */ };
+  }, [applicationId, user?._id]);
+
+  // Clean up on unmount
+  useEffect(() => () => { try { joinCleanupRef.current?.(); } catch {} }, []);
+
   const toggleMute = () => {
-    const s = localStreamRef.current; if (!s) return; const next = !muted; setMuted(next); s.getAudioTracks().forEach((t) => (t.enabled = !next));
+    const s = localStreamRef.current; if (!s) return;
+    const next = !muted; setMuted(next);
+    s.getAudioTracks().forEach((t) => (t.enabled = !next));
   };
   const toggleCamera = () => {
-    const s = localStreamRef.current; if (!s) return; const next = !cameraOff; setCameraOff(next); s.getVideoTracks().forEach((t) => (t.enabled = !next));
+    const s = localStreamRef.current; if (!s) return;
+    const next = !cameraOff; setCameraOff(next);
+    s.getVideoTracks().forEach((t) => (t.enabled = !next));
   };
   const shareScreen = async () => {
     if (sharing) return;
     try {
+      const pc = pcRef.current; if (!pc) return;
       const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
       screenStreamRef.current = screen; setSharing(true);
-      const sender = pcRef.current.getSenders().find((x) => x.track && x.track.kind === 'video');
+      const sender = pc.getSenders().find((x) => x.track && x.track.kind === 'video');
       if (sender && screen.getVideoTracks()[0]) await sender.replaceTrack(screen.getVideoTracks()[0]);
       screen.getVideoTracks()[0].addEventListener('ended', async () => {
         const cam = localStreamRef.current?.getVideoTracks()[0];
@@ -567,6 +601,8 @@ export default function LiveCallPage() {
     } catch {}
   };
   const leave = () => {
+    try { joinCleanupRef.current?.(); } catch {}
+    joinCleanupRef.current = null;
     try { getSocket()?.emit('call:leave', { applicationId }); } catch {}
     try { pcRef.current?.close(); } catch {}
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -577,15 +613,15 @@ export default function LiveCallPage() {
   return (
     <div className="w-full h-full flex flex-col p-2 sm:p-3 gap-3">
       <div className="rounded-xl border bg-white p-3 shrink-0">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center gap-2 justify-between">
           <div className="text-sm">
             <div className="font-semibold">Live Call</div>
             <div className="text-gray-500">Application ID: {applicationId}</div>
             {error && <div className="text-red-600">{error}</div>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!ready ? (
-              <button onClick={() => window.__joinCall?.()} disabled={joining} className="rounded bg-purple-600 px-3 py-1 text-sm text-white disabled:opacity-50">
+              <button onClick={() => joinRef.current?.()} disabled={joining} className="rounded bg-purple-600 px-3 py-1 text-sm text-white disabled:opacity-50">
                 {joining ? 'Joining…' : 'Join Call'}
               </button>
             ) : (
@@ -599,11 +635,11 @@ export default function LiveCallPage() {
             )}
           </div>
         </div>
-        <div className="mt-3 flex items-center gap-2 text-sm">
-          <button className={`px-3 py-1 rounded ${tab==='video'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('video')}>Video</button>
-          <button className={`px-3 py-1 rounded ${tab==='code'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('code')}>Code</button>
-          <button className={`px-3 py-1 rounded ${tab==='whiteboard'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('whiteboard')}>Whiteboard</button>
-          <button className={`px-3 py-1 rounded ${tab==='notes'?'bg-gray-900 text-white':'border'}`} onClick={()=>setTab('notes')}>Notes</button>
+        <div className="mt-3 flex items-center gap-2 text-sm overflow-x-auto no-scrollbar">
+          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='video'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('video')}>Video</button>
+          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='code'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('code')}>Code</button>
+          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='whiteboard'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('whiteboard')}>Whiteboard</button>
+          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='notes'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('notes')}>Notes</button>
           {/* Calendar */}
           <a
             href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000')}/api/interview/${applicationId}/ics`}
@@ -622,8 +658,12 @@ export default function LiveCallPage() {
 
       {tab === 'video' && (
         <div className="grid gap-3 md:grid-cols-2 flex-1 min-h-0">
-          <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full rounded-lg border bg-black object-cover" />
-          <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full rounded-lg border bg-black object-cover" />
+          <div className="w-full aspect-video md:h-full">
+            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full rounded-lg border bg-black object-cover" />
+          </div>
+          <div className="w-full aspect-video md:h-full">
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full rounded-lg border bg-black object-cover" />
+          </div>
         </div>
       )}
 
