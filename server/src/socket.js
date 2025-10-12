@@ -48,10 +48,15 @@ export function initSocket(httpServer, { corsOrigin }) {
   try {
     const redisUrl = process.env.REDIS_URL;
     if (redisUrl) {
-      const pub = new Redis(redisUrl);
-      const sub = new Redis(redisUrl);
-      io.adapter(createAdapter(pub, sub));
-      console.log("✅ Socket.io Redis adapter enabled");
+      const useTls = String(redisUrl).startsWith("rediss://");
+      const redisOpts = useTls ? { tls: {} } : {};
+      const pub = new Redis(redisUrl, redisOpts);
+      const sub = new Redis(redisUrl, redisOpts);
+      pub.on("error", (e) => console.error("[Redis] pub error:", e?.message || e));
+      sub.on("error", (e) => console.error("[Redis] sub error:", e?.message || e));
+      const requestsTimeout = Number(process.env.SIO_REQUESTS_TIMEOUT_MS || 8000);
+      io.adapter(createAdapter(pub, sub, { requestsTimeout }));
+      console.log(`✅ Socket.io Redis adapter enabled (requestsTimeout=${requestsTimeout}ms)`);
     } else {
       console.log("ℹ️ REDIS_URL not set - Socket.io running without cluster adapter");
     }
@@ -215,8 +220,20 @@ export function initSocket(httpServer, { corsOrigin }) {
         socket.join(room);
         socket.data.callRooms.set(room, { role: check.role, anonymized: Boolean(anonymized) });
 
-        const sockets = await io.in(room).fetchSockets();
-        const participants = buildCallParticipantsPayload(sockets, room);
+        let participants = [];
+        try {
+          const sockets = await io.in(room).fetchSockets();
+          participants = buildCallParticipantsPayload(sockets, room);
+        } catch (e) {
+          // If Redis adapter request/response failed (common in misconfigured clusters),
+          // fall back to local room membership so join doesn't fail entirely.
+          console.error("call:join fetchSockets failed, falling back to local room members:", e?.message || e);
+          const ids = io.sockets.adapter.rooms.get(room) || new Set();
+          const localSockets = Array.from(ids)
+            .map((id) => io.sockets.sockets.get(id))
+            .filter(Boolean);
+          participants = buildCallParticipantsPayload(localSockets, room);
+        }
 
         socket.emit("call:participants", {
           applicationId,
