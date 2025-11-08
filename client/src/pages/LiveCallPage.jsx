@@ -11,8 +11,8 @@ import Editor from '@monaco-editor/react';
 const CLIENT_ENV = {
   // Keep this false by default — client should not call Metered directly with a key.
   VITE_ENABLE_METERED: (import.meta.env.VITE_ENABLE_METERED ?? 'false'),
-  VITE_METERED_SUBDOMAIN: (import.meta.env.VITE_METERED_SUBDOMAIN ?? ''),
-  VITE_METERED_API_KEY: (import.meta.env.VITE_METERED_API_KEY ?? ''),
+  VITE_METERED_SUBDOMAIN: (import.meta.env.VITE_METERED_SUBDOMAIN ?? 'sawconnect'),
+  VITE_METERED_API_KEY: (import.meta.env.VITE_METERED_API_KEY ?? 'fe4tvbmXP7i4yKIXlcdaA0vfl4Z65TZ9e3yDgDDiN8sNfveF'),
   VITE_API_URL: (import.meta.env.VITE_API_URL ?? 'http://localhost:5000'),
 };
 
@@ -42,6 +42,10 @@ export default function LiveCallPage() {
   const [calendarMeta, setCalendarMeta] = useState(null);
   const [recording, setRecording] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [participantsCount, setParticipantsCount] = useState(1);
+  const [socketId, setSocketId] = useState('');
+  const [isLeader, setIsLeader] = useState(false);
+  const [iceSource, setIceSource] = useState(''); // 'server' | 'metered' | 'env'
 
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
@@ -76,6 +80,16 @@ export default function LiveCallPage() {
 
   // Init socket once token available
   useEffect(() => { if (token) initSocket(token); }, [token]);
+
+  // Track socket id for diagnostics
+  useEffect(() => {
+    const s = getSocket();
+    if (!s) return;
+    const update = () => setSocketId(String(s.id || ''));
+    update();
+    s.on && s.on('connect', update);
+    return () => { try { s.off && s.off('connect', update); } catch {} };
+  }, [token]);
 
   // ---------- Recording helpers (top-level; NOT inside join) ----------
   const buildMixedAudioStream = () => {
@@ -360,6 +374,7 @@ export default function LiveCallPage() {
       const res = await api.get('/turn/credentials'); // baseURL probably already /api
       if (Array.isArray(res.data?.iceServers) && res.data.iceServers.length) {
         try { console.log('[ICE] Using server-proxied iceServers:', res.data.iceServers.map(x=>x.urls)); } catch {}
+        setIceSource('server');
         return res.data.iceServers;
       }
     } catch (e) {
@@ -381,6 +396,7 @@ export default function LiveCallPage() {
           const data = await res.json().catch(() => ({}));
           if (Array.isArray(data.iceServers) && data.iceServers.length) {
             try { console.log('[ICE] Using Metered direct iceServers:', data.iceServers.map(x=>x.urls)); } catch {}
+            setIceSource('metered');
             return data.iceServers;
           }
         } else if (res.status === 401) {
@@ -401,6 +417,7 @@ export default function LiveCallPage() {
       TURN_URLS.forEach(u=> iceFromEnv.push({ urls: u, username: TURN_USERNAME, credential: TURN_CREDENTIAL }));
     }
     try { console.log('[ICE] Using env ICE (STUN/TURN):', iceFromEnv.map(x=>x.urls)); } catch {}
+    setIceSource('env');
     return iceFromEnv;
   };
   // -------------------------------------------------------------------
@@ -477,13 +494,27 @@ export default function LiveCallPage() {
         // Socket handlers
         const onParticipants = ({ participants, role }) => {
           roleRef.current = role || roleRef.current;
-          politeRef.current = roleRef.current === 'employer' || roleRef.current === 'team';
-          const me = user?._id;
-          const others = (participants||[]).filter((p)=>String(p.userId)!==String(me));
-          if (others.length) { maybeNegotiate(); }
+          // Force polite mode to avoid offer glare when two tabs join with same role/user
+          politeRef.current = true;
+          // If at least two participants are present in the room, try to negotiate
+          const count = (participants || []).length;
+          setParticipantsCount(count || 1);
+          if (count >= 2) {
+            // Decide a stable offerer by smallest tuple (userId, sid)
+            try {
+              const me = String(user?._id || '');
+              const sid = String(getSocket()?.id || '');
+              const tuples = (participants || []).map(p=>[String(p.userId||''), String(p.sid||'')]);
+              tuples.sort((a,b)=> a[0]===b[0] ? (a[1]<b[1]? -1 : a[1]>b[1]? 1 : 0) : (a[0]<b[0]? -1 : 1));
+              const leader = tuples[0];
+              const amLeader = Boolean(leader && me && sid && leader[0] === me && leader[1] === sid);
+              setIsLeader(amLeader);
+              if (amLeader) { maybeNegotiate(); }
+            } catch { /* fallback noop */ }
+          }
         };
-        const onPeerJoined = () => { maybeNegotiate(); };
-        const onPeerLeft = () => { otherUserIdRef.current = null; };
+        const onPeerJoined = () => { setParticipantsCount((c) => Math.max(2, c + 1)); };
+        const onPeerLeft = () => { otherUserIdRef.current = null; setParticipantsCount((c) => Math.max(1, c - 1)); };
 
         const onOffer = async ({ from, description }) => {
           otherUserIdRef.current = from || null;
@@ -575,6 +606,15 @@ export default function LiveCallPage() {
   // Clean up on unmount
   useEffect(() => () => { try { joinCleanupRef.current?.(); } catch {} }, []);
 
+  // Auto-join on load when possible (dev/prod)
+  useEffect(() => {
+    if (!ready && !joining && joinRef.current) {
+      // small delay to allow socket connect
+      const t = setTimeout(() => { try { joinRef.current?.(); } catch {} }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [applicationId, ready, joining]);
+
   const toggleMute = () => {
     const s = localStreamRef.current; if (!s) return;
     const next = !muted; setMuted(next);
@@ -617,9 +657,18 @@ export default function LiveCallPage() {
           <div className="text-sm">
             <div className="font-semibold">Live Call</div>
             <div className="text-gray-500">Application ID: {applicationId}</div>
+            <div className="text-[11px] text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+              <span>Socket: <span className="font-mono">{socketId||'...'}</span></span>
+              <span>Leader: <span className="font-mono">{isLeader? 'true':'false'}</span></span>
+              <span>ICE: <span className="font-mono">{iceSource||'...'}</span></span>
+              <span>API: <span className="font-mono">{String(CLIENT_ENV.VITE_API_URL||'')}</span></span>
+              <span>ENABLE_METERED: <span className="font-mono">{String(CLIENT_ENV.VITE_ENABLE_METERED||'')}</span></span>
+              <span>SUBDOMAIN: <span className="font-mono">{String(CLIENT_ENV.VITE_METERED_SUBDOMAIN||'')}</span></span>
+            </div>
             {error && <div className="text-red-600">{error}</div>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border px-2 py-0.5 text-xs text-gray-700 bg-gray-50">Participants: {participantsCount}</span>
             {!ready ? (
               <button onClick={() => joinRef.current?.()} disabled={joining} className="rounded bg-purple-600 px-3 py-1 text-sm text-white disabled:opacity-50">
                 {joining ? 'Joining…' : 'Join Call'}

@@ -35,6 +35,7 @@ const buildCallParticipantsPayload = (sockets, room) =>
   sockets.map((sock) => {
     const meta = sock.data.callRooms?.get(room) || {};
     return {
+      sid: sock.id,
       userId: sock.user.id,
       role: meta.role || "participant",
       anonymized: Boolean(meta.anonymized),
