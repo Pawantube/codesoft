@@ -32,6 +32,7 @@ import matchRoutes from './routes/matchRoutes.js';
 import recommendationsRoutes from './routes/recommendationsRoutes.js';
 import resumeRoutes from './routes/resumeRoutes.js';
 import moderationRoutes from './routes/moderationRoutes.js';
+import brandRoutes from './routes/brandRoutes.js';
 import turnRoutes from './routes/turnRoutes.js'; // exposes GET /credentials
 import { initSocket } from './socket.js';
 
@@ -139,6 +140,7 @@ app.use('/api/match', matchRoutes);
 app.use('/api/recommendations', recommendationsRoutes);
 app.use('/api/resume', resumeRoutes);
 app.use('/api/moderate', moderationRoutes);
+app.use('/api/brand', brandRoutes);
 
 // TURN creds route (expects routes/turnRoutes.js to define GET /credentials)
 app.use('/api/turn', turnRoutes);

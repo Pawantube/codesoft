@@ -24,6 +24,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [text, setText] = useState('');
+  const [modWarning, setModWarning] = useState(null); // { reasons:[], categories:[] }
   const [showProfile, setShowProfile] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null); // { applicationId, from }
   const [searchTerm, setSearchTerm] = useState('');
@@ -202,6 +203,25 @@ export default function ChatPage() {
     const trimmed = text.trim();
     if (!trimmed || !activeConversationId || !token) return;
     try {
+      // Moderation pre-check (soft)
+      let unsafe = false, reasons = [], categories = [];
+      try {
+        const resp = await fetch(`${API_URL}/api/moderate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ content: trimmed, type: 'chat' })
+        });
+        if (resp.ok) {
+          const out = await resp.json();
+          unsafe = !!out.unsafe; reasons = out.reasons || []; categories = out.categories || [];
+        }
+      } catch {}
+      if (unsafe) {
+        setModWarning({ reasons, categories });
+        // Do not send yet; user can press Send again to confirm
+        return;
+      }
+
       await fetch(`${API_URL}/api/chat/messages`, {
         method: 'POST',
         headers: {
@@ -211,6 +231,7 @@ export default function ChatPage() {
         body: JSON.stringify({ conversationId: activeConversationId, body: trimmed })
       });
       setText('');
+      setModWarning(null);
     } catch (error) {
       console.error(error);
     }
@@ -422,6 +443,26 @@ export default function ChatPage() {
         </div>
 
         <div className="flex-1 overflow-auto p-4">
+          {modWarning && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <div className="font-semibold">Warning: your message may violate content guidelines.</div>
+              {modWarning.reasons?.length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {modWarning.reasons.slice(0,3).map((r,i)=>(<li key={i}>{r}</li>))}
+                </ul>
+              )}
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => setModWarning(null)}
+                  className="rounded border px-2 py-1"
+                >Edit message</button>
+                <button
+                  onClick={async ()=>{ setModWarning(null); await handleSend(); }}
+                  className="rounded bg-gray-900 px-2 py-1 text-white"
+                >Send anyway</button>
+              </div>
+            </div>
+          )}
           {incomingCall && (
             <div className="mb-3 rounded-lg border bg-yellow-50 p-3 text-sm text-gray-800">
               <div className="flex items-center justify-between">

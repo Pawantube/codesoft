@@ -643,15 +643,15 @@ export default function LiveCallPage() {
           {/* Calendar */}
           <a
             href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000')}/api/interview/${applicationId}/ics`}
-            className="ml-auto px-3 py-1 rounded border"
+            className="ml-auto px-3 py-1 rounded border bg-white text-gray-900"
           >
             Download ICS
           </a>
           {googleUrl && (
-            <a href={googleUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border">Google</a>
+            <a href={googleUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border bg-white text-gray-900">Google</a>
           )}
           {outlookUrl && (
-            <a href={outlookUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border">Outlook</a>
+            <a href={outlookUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border bg-white text-gray-900">Outlook</a>
           )}
         </div>
       </div>
@@ -708,7 +708,7 @@ export default function LiveCallPage() {
       )}
 
       {tab === 'notes' && (
-        <div className="rounded-xl border bg-white p-3 space-y-3">
+        <div className="rounded-xl border bg-white p-3 space-y-3 text-gray-900">
           <div className="grid md:grid-cols-2 gap-3">
             <div>
               <div className="font-semibold text-sm mb-1">Notes</div>

@@ -116,19 +116,15 @@ export default function LiveCoding() {
   const handleRun = async () => {
     setRunning(true);
     try {
-      const res = await api.post(`/coding-sessions/${id}/run`, { code });
+      const res = await api.post(`/coding-sessions/${id}/run`, { code, language });
       const payload = res.data || {};
       const text = [payload.output, payload.error].filter(Boolean).join("\n");
       setOutput(text || "(no output)");
-      setSession((prev) =>
+      setSession((prev) => (
         prev
-          ? {
-              ...prev,
-              runCount: (prev.runCount || 0) + 1,
-              updatedAt: new Date().toISOString(),
-            }
+          ? { ...prev, runCount: (prev.runCount || 0) + 1, updatedAt: new Date().toISOString() }
           : prev
-      );
+      ));
     } catch (error) {
       console.error(error);
       setOutput(error?.response?.data?.error || "Execution failed");
@@ -159,8 +155,20 @@ export default function LiveCoding() {
             Runs: <span className="font-medium text-gray-900">{session.runCount ?? 0}</span>
           </div>
         </div>
-        {prompt && <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">{prompt}</p>}
+        <div className="mt-3 flex items-center gap-2">
+          <label className="text-sm text-gray-700">Select language</label>
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="border rounded px-2 py-1 text-sm"
+          >
+            <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+          </select>
+        </div>
       </header>
+
+      {prompt && <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">{prompt}</p>}
 
       <main className="grid gap-4 lg:grid-cols-2">
         <section className="flex flex-col rounded-xl border bg-white">

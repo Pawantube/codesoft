@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -30,11 +30,23 @@ export default function JobDetail(){
   const [myStatus,setMyStatus]=useState('');
   const [aiLetter, setAiLetter] = useState('');
   const [genLoading, setGenLoading] = useState(false);
+  const location = useLocation();
+  const refCode = useMemo(()=>{
+    const p = new URLSearchParams(location.search);
+    const code = (p.get('ref')||'').trim();
+    if (code) {
+      try { localStorage.setItem('refCode', code); } catch {}
+    }
+    try { return localStorage.getItem('refCode') || code || ''; } catch { return code || ''; }
+  }, [location.search]);
   useEffect(()=>{ api.get(`/jobs/${id}`).then(r=>setJob(r.data)); },[id]);
   useEffect(()=>{ if(user?.role==='candidate'){ const url=(import.meta.env.VITE_API_URL||'http://localhost:5000')+'/api/applications/me'; fetch(url,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(list=>{ const hit=list.find(a=>a.job?._id===id); if(hit) setMyStatus(hit.status); }).catch(()=>{});} },[user,id,token]);
   const share=async()=>{ const url=window.location.href; try{ if(navigator.share) await navigator.share({title:job.title,url}); else { await navigator.clipboard.writeText(url); alert('Link copied'); } }catch{} };
   const apply=async(e)=>{ e.preventDefault(); if(!user||user.role!=='candidate'){ alert('Login as candidate to apply'); return; } const fd=new FormData(); fd.append('jobId',id); Object.entries(form).forEach(([k,v])=>fd.append(k,v)); if(file) fd.append('resume',file);
-    const res=await fetch((import.meta.env.VITE_API_URL||'http://localhost:5000')+'/api/applications',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd}); if(!res.ok){ const msg=await res.text(); alert(`Apply failed: ${res.status} ${msg}`); return;} alert('Applied!'); setMyStatus('submitted'); };
+    const apiBase=(import.meta.env.VITE_API_URL||'http://localhost:5000');
+    const res=await fetch(apiBase+'/api/applications',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd}); if(!res.ok){ const msg=await res.text(); alert(`Apply failed: ${res.status} ${msg}`); return;}
+    try { if (refCode) { await fetch(apiBase+'/api/referrals/convert',{ method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` }, body: JSON.stringify({ code: refCode, status:'applied' }) }); } } catch {}
+    alert('Applied!'); setMyStatus('submitted'); };
   const genCover = async () => {
     if (!job) return;
     setGenLoading(true);
@@ -51,8 +63,15 @@ export default function JobDetail(){
   return(<div className="space-y-6">
     <div className="bg-white rounded-xl border p-4 space-y-2">
       <div className="flex justify-between"><h1 className="text-2xl font-bold">{job.title}</h1><button onClick={share} className="text-sm px-3 py-1 rounded-lg border">Share</button></div>
-      <div className="text-gray-600">{job.company} — {job.location}</div>
+      <div className="text-gray-600">
+        <Link to={`/brand/${(job.company||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')}`} className="underline">{job.company}</Link> — {job.location}
+      </div>
       <div className="text-sm">{job.type} • {job.workType} • Shift: {job.shift} • Exp: {job.minExperience}+ yrs</div>
+      {job.bountyActive && job.bountyAmount > 0 && (
+        <div className="mt-2 rounded-lg border bg-green-50 p-2 text-sm text-green-900">
+          Referral bounty: <span className="font-semibold">{job.bountyCurrency || 'USD'} {job.bountyAmount}</span> on successful hire
+        </div>
+      )}
       {myStatus && <div className="text-sm mt-2">Your status: <span className="font-medium">{myStatus}</span></div>}
       <p className="whitespace-pre-wrap">{job.description}</p>
     </div>

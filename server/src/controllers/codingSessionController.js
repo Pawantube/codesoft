@@ -1,5 +1,9 @@
 import { Types } from 'mongoose';
 import vm from 'vm';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import CodingSession from '../models/CodingSession.js';
 import Application from '../models/Application.js';
 
@@ -137,9 +141,58 @@ const runJavaScript = (code) => {
   };
 };
 
+// Best-effort Java runner using local JDK (javac/java). Intended for small snippets.
+// Security note: This executes user code on the server and should only be used in trusted/dev environments.
+const runJava = async (code) => {
+  // If the snippet lacks a class definition, wrap it in a Main class with a main method
+  const needsWrap = !/\bclass\s+\w+/m.test(code);
+  const source = needsWrap
+    ? `public class Main { public static void main(String[] args) throws Exception { ${code} } }`
+    : code;
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'java-run-'));
+  const filePath = path.join(tmpRoot, 'Main.java');
+  await fs.writeFile(filePath, source, 'utf8');
+
+  const runWithTimeout = (cmd, args, cwd, timeoutMs = 6000) => new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd });
+    let stdout = '';
+    let stderr = '';
+    const killTimer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+    }, timeoutMs);
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('close', (code) => {
+      clearTimeout(killTimer);
+      resolve({ code, stdout, stderr });
+    });
+    child.on('error', () => {
+      clearTimeout(killTimer);
+      resolve({ code: -1, stdout: '', stderr: 'Failed to spawn process' });
+    });
+  });
+
+  try {
+    // Compile
+    const c = await runWithTimeout('javac', ['Main.java'], tmpRoot, 8000);
+    if (c.code !== 0) {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+      return { error: c.stderr || 'javac failed' };
+    }
+    // Run
+    const r = await runWithTimeout('java', ['Main'], tmpRoot, 6000);
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    if (r.code !== 0) return { error: r.stderr || 'java failed', output: r.stdout };
+    return { output: r.stdout };
+  } catch (e) {
+    try { await fs.rm(tmpRoot, { recursive: true, force: true }); } catch {}
+  }
+};
+
 export const runCode = async (req, res) => {
   const { id } = req.params;
-  const { code } = req.body;
+  const { code, language: overrideLang } = req.body || {};
   const session = await CodingSession.findById(id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   if (!ensureParticipant(session, req.user._id)) return res.status(403).json({ error: 'Forbidden' });
@@ -147,20 +200,18 @@ export const runCode = async (req, res) => {
   const source = code ?? session.code;
   let result;
 
-  if (session.language === 'javascript') {
+  const lang = (overrideLang || session.language || 'javascript').toLowerCase();
+  if (lang === 'javascript' || lang === 'js') {
     result = runJavaScript(source);
+  } else if (lang === 'java') {
+    result = await runJava(source);
   } else {
-    result = { error: `Language ${session.language} is not yet supported.` };
+    result = { error: `Language ${lang} is not yet supported.` };
   }
 
   session.lastActivityAt = new Date();
   session.runCount += 1;
   await session.save();
 
-  res.json({ language: session.language, ...result });
+  res.json({ language: lang, ...result });
 };
-
-
-
-
-

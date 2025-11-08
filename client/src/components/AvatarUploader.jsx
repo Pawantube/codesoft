@@ -1,6 +1,17 @@
 import { useState } from 'react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { fileUrl } from '../utils/fileUrl';
+
+const FALLBACK_AVATAR =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 64 64">
+      <rect width="64" height="64" fill="#e5e7eb"/>
+      <circle cx="32" cy="24" r="12" fill="#9ca3af"/>
+      <rect x="12" y="42" width="40" height="14" rx="7" fill="#9ca3af"/>
+    </svg>`
+  );
 
 export default function AvatarUploader() {
   const { user, setUser } = useAuth?.() || {};
@@ -30,8 +41,8 @@ export default function AvatarUploader() {
     <div className="space-y-2">
       <div className="flex items-center gap-3">
         <img
-          src={!imgError && user?.avatarUrl ? user.avatarUrl : 'https://ui-avatars.com/api/?background=EEE&color=111&name=' + encodeURIComponent(user?.name||'User')}
-          onError={() => setImgError(true)}
+          src={(user?.avatarUrl && !imgError ? (/^https?:\/\//i.test(user.avatarUrl) ? user.avatarUrl : fileUrl(user.avatarUrl)) : FALLBACK_AVATAR)}
+          onError={(e) => { if (!imgError) { setImgError(true); e.currentTarget.src = FALLBACK_AVATAR; } }}
           alt="avatar"
           className="h-14 w-14 rounded-full object-cover border"
         />

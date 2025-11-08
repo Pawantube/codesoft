@@ -15,6 +15,9 @@ export default function EditJob() {
         type: j.type, workType: j.workType, shift: j.shift,
         minExperience: j.minExperience, description: j.description,
         salaryMin: j.salaryMin || '', salaryMax: j.salaryMax || '',
+        bountyActive: !!j.bountyActive,
+        bountyAmount: j.bountyAmount ?? '',
+        bountyCurrency: j.bountyCurrency || 'USD',
         featured: j.featured, faqs: j.faqs?.length ? j.faqs : [{ q:'', a:'' }]
       });
     });
@@ -29,7 +32,10 @@ export default function EditJob() {
       ...form,
       minExperience: Number(form.minExperience || 0),
       salaryMin: form.salaryMin ? Number(form.salaryMin) : undefined,
-      salaryMax: form.salaryMax ? Number(form.salaryMax) : undefined
+      salaryMax: form.salaryMax ? Number(form.salaryMax) : undefined,
+      bountyActive: !!form.bountyActive,
+      bountyAmount: form.bountyAmount ? Number(form.bountyAmount) : 0,
+      bountyCurrency: form.bountyCurrency || 'USD'
     };
     await api.patch(`/jobs/${id}`, payload);
     nav('/employer/jobs');
@@ -77,6 +83,26 @@ export default function EditJob() {
                value={form.salaryMin} onChange={e=>setForm({...form, salaryMin:e.target.value})}/>
         <input className="border rounded px-3 py-2" placeholder="Salary max (₹)"
                value={form.salaryMax} onChange={e=>setForm({...form, salaryMax:e.target.value})}/>
+      </div>
+
+      <div className="rounded border p-3">
+        <div className="font-semibold mb-2">Referral Bounty</div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={!!form.bountyActive} onChange={e=>setForm({...form, bountyActive: e.target.checked})} />
+          Enable bounty for referrals
+        </label>
+        {form.bountyActive && (
+          <div className="mt-2 grid sm:grid-cols-3 gap-2">
+            <input className="border rounded px-3 py-2" placeholder="Amount" value={form.bountyAmount} onChange={e=>setForm({...form, bountyAmount: e.target.value})} />
+            <select className="border rounded px-3 py-2" value={form.bountyCurrency} onChange={e=>setForm({...form, bountyCurrency: e.target.value})}>
+              <option value="USD">USD</option>
+              <option value="INR">INR</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+            </select>
+            <div className="text-xs text-gray-500 self-center">Paid on successful hire. Shown on referral links.</div>
+          </div>
+        )}
       </div>
 
       <label className="flex gap-2 text-sm">

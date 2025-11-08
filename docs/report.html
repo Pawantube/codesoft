@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Internship Mid‑Term Report – CodSoft | MERN Job Board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink:#0f172a; --muted:#475569; --border:#e2e8f0; --bg:#ffffff; --accent:#111827; }
+    *{ box-sizing:border-box }
+    html,body{ margin:0; background:var(--bg); color:var(--ink); font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    .container{ max-width:1000px; margin:0 auto; padding:40px 24px; }
+    h1{ font-size:34px; margin:0 0 8px; }
+    h2{ font-size:22px; margin:28px 0 8px; padding-top:12px; border-top:1px solid var(--border); }
+    h3{ font-size:18px; margin:20px 0 8px; }
+    p, li{ line-height:1.6; font-size:15px; color:var(--ink); }
+    .muted{ color:var(--muted); }
+    .badge{ display:inline-block; padding:2px 8px; background:#f1f5f9; color:#0f172a; border-radius:999px; font-size:12px; border:1px solid var(--border); }
+    .grid{ display:grid; gap:14px; grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .card{ border:1px solid var(--border); border-radius:12px; padding:16px; background:white; }
+    .code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:13px; }
+    .list-compact li{ margin:6px 0; }
+    .kv{ display:grid; grid-template-columns: 200px 1fr; gap:8px 16px; border:1px solid var(--border); border-radius:12px; padding:14px; }
+    .kv div:nth-child(odd){ color:var(--muted); }
+    .toc a{ color:var(--accent); text-decoration:none; }
+    .toc a:hover{ text-decoration:underline; }
+    @media print { .no-print{ display:none !important } body{ color:#000 } .card{ box-shadow:none } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Internship Mid‑Term Report</h1>
+      <div class="muted">Organization: CodSoft · Project: MERN Job Board Web App</div>
+      <div class="kv" style="margin-top:16px">
+        <div>Student</div><div>Pawan Kumar</div>
+        <div>Roll No.</div><div>24SCSE2030146</div>
+        <div>University ID</div><div>24132030300</div>
+        <div>Program / Batch</div><div>[Program, Batch]</div>
+        <div>Internship Duration</div><div>15 Sept – 15 October (30 days)</div>
+        <div>Mentor/Supervisor</div><div>[Mentor Name, CodSoft]</div>
+        <div>Reviewer</div><div>Dr. Vajenti Mala, Assistant Professor</div>
+        <div>Reviewer Code</div><div>GUSCSE202232208</div>
+        <div>Reviewer Contact</div><div>+91 8929729686 · vajentimala@galgotiasuniversity.edu.in</div>
+        <div>Organization Contact</div><div>contact@codsoft.in · https://www.codsoft.in</div>
+      </div>
+    </header>
+
+    <nav class="card toc" style="margin-top:18px">
+      <strong>Contents</strong>
+      <ol>
+        <li><a href="#org">Organization Introduction</a></li>
+        <li><a href="#role">Roles & Responsibilities</a></li>
+        <li><a href="#tech">Technologies / Tools</a></li>
+        <li><a href="#work">Work Completed So Far</a></li>
+        <li><a href="#challenges">Challenges & Solutions</a></li>
+        <li><a href="#future">Future Plan / Expected Outcomes</a></li>
+        <li><a href="#appendix">Appendix: Screens/Modules</a></li>
+      </ol>
+    </nav>
+
+    <section id="org">
+      <h2>1. Organization Introduction</h2>
+      <p>CodSoft is an IT services and consultancy company focused on building innovative software solutions for businesses. The team believes in the power of practical, hands‑on learning and invests in future talent via a structured internship program grounded in live projects and real‑world examples. The culture is inclusive and supportive, emphasizing learning, growth, and creativity.</p>
+      <p><strong>Mission.</strong> Continuously improve software by gathering feedback, identifying enhancements, and adopting modern tools and technologies to deliver user‑friendly and reliable solutions.</p>
+      <p><strong>Vision.</strong> Create innovative solutions that leverage emerging technologies to solve problems in new, impactful ways.</p>
+    </section>
+
+    <section id="role">
+      <h2>2. Assigned Roles & Responsibilities</h2>
+      <ul class="list-compact">
+        <li>Implement MERN features for a modern job board application.</li>
+        <li>Build job discovery (home, search, filters) and detailed job view with apply flow.</li>
+        <li>Enable resume uploads and secure file processing for applications.</li>
+        <li>Support employer dashboards and application management endpoints.</li>
+        <li>Integrate real‑time communication (chat, collaborative coding) via Socket.IO.</li>
+        <li>Enhance PWA experience including service worker caching and push notifications.</li>
+      </ul>
+    </section>
+
+    <section id="tech">
+      <h2>3. Technologies / Tools Used</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Frontend</h3>
+          <ul class="list-compact">
+            <li>React (Vite) for SPA</li>
+            <li>Routing: react‑router</li>
+            <li>UI: Utility classes (Tailwind‑style)</li>
+            <li>PWA: <span class="code">client/public/manifest.webmanifest</span>, <span class="code">client/public/sw.js</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Backend</h3>
+          <ul class="list-compact">
+            <li>Node.js + Express</li>
+            <li>Auth + Role‑based access (middleware)</li>
+            <li>File uploads: Multer (memory) → Cloudinary</li>
+            <li>Realtime: Socket.IO for chat and live coding</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted">API base configured via <span class="code">VITE_API_URL</span> (default http://localhost:5000). Client API wrapper: <span class="code">client/src/utils/api.js</span>.</p>
+    </section>
+
+    <section id="work">
+      <h2>4. Work Completed So Far</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Job Discovery & Detail</h3>
+          <ul class="list-compact">
+            <li>Featured jobs on home – <span class="code">client/src/pages/Home.jsx</span></li>
+            <li>Search, filters, pagination – <span class="code">client/src/pages/Jobs.jsx</span></li>
+            <li>Job detail view with FAQs and share/apply – <span class="code">client/src/pages/JobDetail.jsx</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Applications</h3>
+          <ul class="list-compact">
+            <li>Submit application with resume – API: <span class="code">server/src/routes/applicationRoutes.js</span></li>
+            <li>Resume upload validation – <span class="code">server/src/middleware/upload.js</span></li>
+            <li>Candidate “My Applications” & employer views (routes and stubs)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Media & Profile</h3>
+          <ul class="list-compact">
+            <li>Avatar upload to Cloudinary – <span class="code">server/src/routes/mediaRoutes.js</span>, <span class="code">server/src/controllers/mediaController.js</span></li>
+            <li>Task attachments upload (raw files) – media controller</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Realtime & PWA</h3>
+          <ul class="list-compact">
+            <li>Chat UI & conversation search – <span class="code">client/src/pages/ChatPage.jsx</span></li>
+            <li>Live coding collaboration – <span class="code">client/src/pages/LiveCoding.jsx</span></li>
+            <li>Service worker caching + push – <span class="code">client/public/sw.js</span></li>
+            <li>PWA manifest – <span class="code">client/public/manifest.webmanifest</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="challenges">
+      <h2>5. Challenges Faced & Solutions Implemented</h2>
+      <ul>
+        <li><strong>Secure file handling.</strong> Used Multer memory storage with strict file filters (PDF/DOC/RTF) and image‑only constraints; uploaded via Cloudinary streams to avoid local persistence.</li>
+        <li><strong>Stateful search UX.</strong> Synced filters with URL query params to support pagination, deep‑links, and shareable searches.</li>
+        <li><strong>Realtime consistency.</strong> Managed Socket.IO room lifecycle and optimistic UI updates with React effects and refs.</li>
+        <li><strong>Offline resilience.</strong> Implemented cache versioning and graceful fallbacks for navigation/API in the service worker.</li>
+      </ul>
+    </section>
+
+    <section id="future">
+      <h2>6. Future Work Plan / Expected Outcomes</h2>
+      <ul>
+        <li>Polish employer CRUD flows, role‑based gating, and auditing.</li>
+        <li>Scheduling UX for interviews, notifications, and instant invites.</li>
+        <li>Chat enhancements: typing indicators, message read status, attachments.</li>
+        <li>Live coding: multi‑language execution, sandboxing, version history.</li>
+        <li>Add tests (unit/integration) and CI (lint/test/build) pipelines.</li>
+        <li>Cloud deployment and environment‑based configuration management.</li>
+      </ul>
+    </section>
+
+    <section id="appendix">
+      <h2>Appendix: Screens & Modules</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Key Client Screens</h3>
+          <ul class="list-compact">
+            <li>Home – <span class="code">client/src/pages/Home.jsx</span></li>
+            <li>Jobs & Filters – <span class="code">client/src/pages/Jobs.jsx</span></li>
+            <li>Job Detail & Apply – <span class="code">client/src/pages/JobDetail.jsx</span></li>
+            <li>Employer Dashboard – <span class="code">client/src/pages/EmployerDashboard.jsx</span></li>
+            <li>Notifications – <span class="code">client/src/pages/Notifications.jsx</span></li>
+            <li>Chat – <span class="code">client/src/pages/ChatPage.jsx</span></li>
+            <li>Live Coding – <span class="code">client/src/pages/LiveCoding.jsx</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Key Server Routes</h3>
+          <ul class="list-compact">
+            <li>Applications – <span class="code">server/src/routes/applicationRoutes.js</span></li>
+            <li>Media Uploads – <span class="code">server/src/routes/mediaRoutes.js</span></li>
+            <li>Upload Middleware – <span class="code">server/src/middleware/upload.js</span>, <span class="code">server/src/middleware/imageUpload.js</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted">Socket initialization: <span class="code">client/src/utils/socket.js</span>. Client API wrapper: <span class="code">client/src/utils/api.js</span>.</p>
+    </section>
+
+    <section>
+      <h2>Submission Aids</h2>
+      <ul>
+        <li><strong>Slides:</strong> docs/slides.html (open in browser; press S for speaker notes; export to PDF from browser).</li>
+        <li><strong>Report:</strong> print this page to PDF (Ctrl/Cmd+P). Use "Background graphics" for best look.</li>
+        <li><strong>Files to submit:</strong> Offer Letter, Certificate (if issued), Slides PDF, this Report PDF.</li>
+      </ul>
+      <p class="muted">Replace square‑bracket placeholders (e.g., [Your Name]) before export.</p>
+    </section>
+
+    <footer class="muted" style="margin-top:32px">
+      <span class="badge">CodSoft</span>
+      <span class="badge">MERN</span>
+      <span class="badge">PWA</span>
+      <span class="badge">Socket.IO</span>
+      <span class="badge">Cloudinary</span>
+    </footer>
+  </div>
+</body>
+</html>

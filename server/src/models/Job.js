@@ -18,6 +18,10 @@ const jobSchema = new mongoose.Schema(
     minExperience: { type: Number, default: 0 },
     shift:      { type: String, enum: ['Day','Night','Rotational','Flexible'], default: 'Day' },
     workType:   { type: String, enum: ['On-Site','Remote','Hybrid'], default: 'On-Site' },
+    // referral bounty settings
+    bountyActive: { type: Boolean, default: false },
+    bountyAmount: { type: Number, default: 0 },
+    bountyCurrency: { type: String, enum: ['USD','INR','EUR','GBP'], default: 'USD' },
     faqs:       [faqSchema],
     featured:   { type: Boolean, default: false },
 

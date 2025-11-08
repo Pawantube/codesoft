@@ -22,6 +22,15 @@ const userSchema = new mongoose.Schema({
 
   // employer specific
   companyName: String,
+  brandAbout: String,
+  brandPerks: [String],
+  brandLogoUrl: String,
+  brandCoverUrl: String,
+  brandSocials: {
+    website: String,
+    linkedin: String,
+    twitter: String,
+  },
 
   // profile fields
   headline: String,

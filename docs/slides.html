@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Internship Mid‑Term Review – CodSoft | MERN Job Board</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/black.css" id="theme" />
+  <style>
+    .reveal section { font-size: 28px; }
+    .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
+    .small { font-size: 0.8em; opacity: 0.85; }
+    .muted { color: #bbb; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.9em; }
+    .grid { display: grid; gap: .6rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media print { .reveal section { font-size: 18px; } }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <!-- Slide 1: Title -->
+      <section>
+        <h1>Internship Mid‑Term Review</h1>
+        <h3>MERN Job Board Web App</h3>
+        <p>
+          <strong>Intern:</strong> Pawan Kumar · <strong>Roll No.:</strong> 24SCSE2030146 · <strong>Univ ID:</strong> 24132030300<br/>
+          <strong>Organization:</strong> CodSoft · <strong>Internship Duration:</strong> 15 Sept – 15 October (30 days)
+        </p>
+        <p class="small muted">Reviewer: Dr. Vajenti Mala (Assistant Professor) · Code: GUSCSE202232208 · +91 8929729686 · vajentimala@galgotiasuniversity.edu.in</p>
+        <p class="small muted">Contact: contact@codsoft.in · https://www.codsoft.in</p>
+      </section>
+
+      <!-- Slide 2: Organization Introduction -->
+      <section>
+        <h2>About CodSoft</h2>
+        <ul>
+          <li>IT services and consultancy creating innovative software solutions.</li>
+          <li>Believes practical, hands‑on learning drives success in tech.</li>
+          <li>Internship program with live projects, real‑world examples, and mentorship.</li>
+          <li>Inclusive, supportive environment encouraging learning, growth, and creativity.</li>
+        </ul>
+        <p><strong>Mission:</strong> Continuous improvement of software through feedback, updates, and modern tech.</p>
+        <p><strong>Vision:</strong> Build innovative solutions leveraging emerging technologies.</p>
+      </section>
+
+      <!-- Slide 3: Roles & Responsibilities -->
+      <section>
+        <h2>Role & Responsibilities</h2>
+        <ul>
+          <li>Develop MERN features for a modern job board web app.</li>
+          <li>Implement job search, filtering, and detail views.</li>
+          <li>Build candidate application flow with resume uploads.</li>
+          <li>Support employer dashboards and application management.</li>
+          <li>Integrate real‑time features (chat, coding sessions) via Socket.IO.</li>
+          <li>Enhance PWA experience (service worker, offline caching, push).</li>
+        </ul>
+      </section>
+
+      <!-- Slide 4: Tech Stack / Tools -->
+      <section>
+        <h2>Technologies & Tools</h2>
+        <div class="grid">
+          <div>
+            <h3>Frontend</h3>
+            <ul>
+              <li>React + Vite</li>
+              <li>Routing: react-router</li>
+              <li>UI: TailwindCSS classes</li>
+              <li>PWA: manifest + service worker (<span class="code">client/public/sw.js</span>)</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Backend</h3>
+            <ul>
+              <li>Node.js + Express</li>
+              <li>File uploads: Multer (memory) → Cloudinary</li>
+              <li>Auth middleware + roles</li>
+              <li>Socket.IO for chat and live coding</li>
+            </ul>
+          </div>
+        </div>
+        <p class="small">API base: <span class="code">VITE_API_URL</span> (fallback http://localhost:5000)</p>
+      </section>
+
+      <!-- Slide 5: Work Completed -->
+      <section>
+        <h2>Work Completed So Far</h2>
+        <ul>
+          <li>Job discovery: featured jobs on home (`Home.jsx`), full listing with filters (`Jobs.jsx`).</li>
+          <li>Job detail + apply with resume upload (`JobDetail.jsx`, `applicationRoutes.js`).</li>
+          <li>Employer dashboard & job management views (`EmployerDashboard.jsx`).</li>
+          <li>Notifications center (`Notifications.jsx`).</li>
+          <li>Media uploads: avatar and attachments → Cloudinary (`mediaRoutes.js`, `mediaController.js`).</li>
+          <li>Real‑time chat scaffolded (`ChatPage.jsx`) and collaborative live coding (`LiveCoding.jsx`).</li>
+          <li>PWA setup (manifest, service worker caching & push).</li>
+        </ul>
+      </section>
+
+      <!-- Slide 6: Challenges & Solutions -->
+      <section>
+        <h2>Challenges & Solutions</h2>
+        <ul>
+          <li><strong>Secure file handling:</strong> Used Multer memory storage with strict file filters; uploaded to Cloudinary safely.</li>
+          <li><strong>State & pagination:</strong> Synced URL query params with filters to enable shareable job searches.</li>
+          <li><strong>Real‑time sync:</strong> Managed Socket.IO room joins and message/state updates with effect lifecycles.</li>
+          <li><strong>PWA offline:</strong> Cache versioning strategy and graceful fallbacks for navigation/API.</li>
+        </ul>
+      </section>
+
+      <!-- Slide 7: Future Plan / Outcomes -->
+      <section>
+        <h2>Future Plan / Expected Outcomes</h2>
+        <ul>
+          <li>Finalize employer job posting & edit flows; role‑based access across modules.</li>
+          <li>Interview scheduling UX and reminders; instant interviews.</li>
+          <li>Improve chat UX: typing indicators, read receipts, attachments.</li>
+          <li>Live coding: add language switchers, code execution sandboxes, history.</li>
+          <li>Expand test coverage and add CI for lint/test/build.</li>
+          <li>Deployment to cloud (frontend + backend) with environment‑based configs.</li>
+        </ul>
+      </section>
+
+      <!-- Slide 8: Demo & Learnings -->
+      <section>
+        <h2>Demo & Key Learnings</h2>
+        <ul>
+          <li>Quick walkthrough: search → view → apply → employer manage → notifications → chat/live coding.</li>
+          <li>Learned designing REST endpoints, auth + roles, and secure media handling.</li>
+          <li>Experience with PWA patterns and real‑time collaboration via Socket.IO.</li>
+        </ul>
+        <p class="small muted">Thank you! Q&A</p>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      transition: 'slide',
+      slideNumber: true,
+      width: 1280,
+      height: 720
+    });
+  </script>
+</body>
+</html>
