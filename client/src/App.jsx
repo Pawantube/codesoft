@@ -1,6 +1,8 @@
 import { Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import IncomingCallBanner from './components/IncomingCallBanner';
+import InstallPromptBanner from './components/InstallPromptBanner';
+import Toaster from './components/Toaster';
 import Home from './pages/Home';
 import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
@@ -11,6 +13,27 @@ import Profile from './pages/Profile';
 import EmployerJobs from './pages/EmployerJobs';
 import EditJob from './pages/EditJob';
 import EmployerDashboard from './pages/EmployerDashboard';
+import EmployerManageJob from './pages/EmployerManageJob';
+import PostJob from './pages/PostJob';
+import CandidateDashboardPage from './pages/CandidateDashboardPage';
+import VideoFeed from './pages/VideoFeed';
+import Channels from './pages/Channels';
+import Posts from './pages/Posts';
+import ChatPage from './pages/ChatPage';
+import Interested from './pages/Interested';
+import LiveCallPage from './pages/LiveCallPage';
+import Screening from './pages/Screening';
+import BrandPage from './pages/BrandPage';
+import BrandEditor from './pages/BrandEditor';
+import AuthProvider, { useAuth } from './context/AuthContext';
+
+function Protected({ role, children }) {
+  const { user, bootstrapping } = useAuth();
+  if (bootstrapping) return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (role && !(user.role === role || user.role === 'admin')) return <Navigate to="/" replace />;
+  return children;
+}
 
 export default function App() {
   const year = new Date().getFullYear();
