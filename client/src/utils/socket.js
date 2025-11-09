@@ -15,7 +15,12 @@ export function initSocket(token) {
 
   const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   socket = io(baseURL, {
-    transports: ['websocket'],
+    // Be resilient locally: allow polling fallback so dev always connects
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 5000,
     withCredentials: true,
     auth: { token }
   });

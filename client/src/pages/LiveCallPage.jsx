@@ -88,6 +88,11 @@ export default function LiveCallPage() {
     const update = () => setSocketId(String(s.id || ''));
     update();
     s.on && s.on('connect', update);
+    if (import.meta.env.DEV && s.on) {
+      const onErr = (e) => { try { console.warn('[socket] connect_error', e?.message || e); } catch {} };
+      s.on('connect_error', onErr);
+      return () => { try { s.off && s.off('connect', update); s.off && s.off('connect_error', onErr); } catch {} };
+    }
     return () => { try { s.off && s.off('connect', update); } catch {} };
   }, [token]);
 
@@ -433,7 +438,16 @@ export default function LiveCallPage() {
         joinCleanupRef.current = null;
 
         const socket = getSocket();
-        if (!socket) throw new Error('Socket not connected');
+        if (!socket) throw new Error('Socket not initialized');
+        if (!socket.connected) {
+          await new Promise((resolve, reject) => {
+            const onConnect = () => { cleanup(); resolve(); };
+            const onErr = (e) => { cleanup(); reject(e || new Error('connect_error')); };
+            const timeout = setTimeout(() => { cleanup(); reject(new Error('socket connect timeout')); }, 7000);
+            const cleanup = () => { try { clearTimeout(timeout); socket.off('connect', onConnect); socket.off('connect_error', onErr); } catch {} };
+            try { socket.on('connect', onConnect); socket.on('connect_error', onErr); socket.connect(); } catch { cleanup(); resolve(); }
+          });
+        }
 
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localStreamRef.current = stream;
@@ -500,7 +514,9 @@ export default function LiveCallPage() {
           const count = (participants || []).length;
           setParticipantsCount(count || 1);
           if (count >= 2) {
-            // Decide a stable offerer by smallest tuple (userId, sid)
+            // In development, be aggressive: negotiate as soon as 2+ participants
+            if (import.meta.env.DEV) { setIsLeader(true); maybeNegotiate(); return; }
+            // In production, decide a stable offerer by smallest tuple (userId, sid)
             try {
               const me = String(user?._id || '');
               const sid = String(getSocket()?.id || '');
