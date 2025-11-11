@@ -8,6 +8,98 @@ const ensureRecord = async (applicationId) => {
   return rec;
 };
 
+// AI provider config (OpenAI-compatible). If AI_* vars are not set, falls back to OpenAI.
+const getAiConfig = () => {
+  const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+  const baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const model = process.env.AI_MODEL || 'gpt-4o-mini';
+  return { apiKey, baseUrl, model };
+};
+
+export const generateScorecard = async (req, res) => {
+  const { applicationId } = req.params;
+  const { rubric } = req.body || {};
+  const rec = await ensureRecord(applicationId);
+  const transcript = (rec.transcriptText || '').trim();
+  if (!transcript) return res.status(400).json({ error: 'No transcript available' });
+  const questions = Array.isArray(rec.questions) ? rec.questions : [];
+
+  const { apiKey, baseUrl, model } = getAiConfig();
+  if (!apiKey) {
+    // Fallback: naive scorecard with zero scores
+    const criteria = questions.map(q => ({ questionId: q.id, criterion: q.text, score: 0, rationale: 'AI not configured' }));
+    rec.scorecard = {
+      overallScore: 0,
+      summary: 'AI not configured. Provide OPENAI_API_KEY to enable automated scoring.',
+      criteria,
+      provider: 'naive',
+      generatedAt: new Date(),
+    };
+    await rec.save();
+    return res.json({ scorecard: rec.scorecard });
+  }
+
+  try {
+    const sys = 'You are an expert technical interviewer. Produce a JSON scorecard with 0-5 scores.';
+    const prompt = {
+      transcript,
+      questions,
+      rubric: rubric || null,
+      format: {
+        criteria: [
+          { questionId: 'string', criterion: 'string', score: '0-5', rationale: 'string 1-2 sentences' }
+        ]
+      }
+    };
+    const { apiKey, baseUrl, model } = getAiConfig();
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: `Return ONLY JSON. Use this:\nQuestions: ${JSON.stringify(questions)}\nTranscript: ${transcript}\nRubric (optional): ${rubric ? JSON.stringify(rubric) : 'null'}\nSchema: ${JSON.stringify(prompt.format)}` }
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' }
+      })
+    });
+    if (!resp.ok) throw new Error(`AI provider ${resp.status}`);
+    const data = await resp.json();
+    const content = data?.choices?.[0]?.message?.content || '{}';
+    let parsed = {};
+    try { parsed = JSON.parse(content); } catch { parsed = {}; }
+    const overall = Number(parsed.overallScore) || 0;
+    const criteria = Array.isArray(parsed.criteria) ? parsed.criteria.map(c => ({
+      questionId: String(c.questionId || ''),
+      criterion: String(c.criterion || ''),
+      score: Number(c.score) || 0,
+      rationale: String(c.rationale || ''),
+    })) : [];
+    rec.scorecard = {
+      overallScore: overall,
+      summary: String(parsed.summary || ''),
+      criteria,
+      model,
+      provider: process.env.AI_API_KEY ? 'custom' : 'openai',
+      generatedAt: new Date(),
+    };
+    await rec.save();
+    res.json({ scorecard: rec.scorecard });
+  } catch (e) {
+    rec.scorecard = {
+      overallScore: 0,
+      summary: 'Scorecard generation failed. Showing fallback.',
+      criteria: questions.map(q => ({ questionId: q.id, criterion: q.text, score: 0, rationale: 'fallback' })),
+      provider: 'fallback',
+      generatedAt: new Date(),
+    };
+    await rec.save();
+    res.json({ scorecard: rec.scorecard, error: e?.message });
+  }
+};
+
 export const getInterviewMeta = async (req, res) => {
   const { applicationId } = req.params;
   try {
@@ -116,7 +208,9 @@ export const getInterview = async (req, res) => {
     application: String(rec.application),
     notes: rec.notes || [],
     transcriptText: rec.transcriptText || '',
-    summaryText: rec.summaryText || ''
+    summaryText: rec.summaryText || '',
+    questions: rec.questions || [],
+    scorecard: rec.scorecard || null
   });
 };
 
@@ -142,13 +236,29 @@ export const setTranscript = async (req, res) => {
   res.json({ ok: true });
 };
 
+export const setQuestions = async (req, res) => {
+  const { applicationId } = req.params;
+  const { questions } = req.body || {};
+  if (!Array.isArray(questions) || questions.length === 0) return res.status(400).json({ error: 'questions[] required' });
+  const safe = questions.map((q, i) => ({
+    id: String(q.id || i + 1),
+    text: String(q.text || ''),
+    weight: Number.isFinite(Number(q.weight)) ? Number(q.weight) : 1,
+    category: q.category ? String(q.category) : undefined,
+  })).filter(x => x.text);
+  const rec = await ensureRecord(applicationId);
+  rec.questions = safe;
+  await rec.save();
+  res.json({ ok: true, questions: rec.questions });
+};
+
 export const summarize = async (req, res) => {
   const { applicationId } = req.params;
   const rec = await ensureRecord(applicationId);
   const text = rec.transcriptText || '';
   if (!text.trim()) return res.status(400).json({ error: 'No transcript to summarize' });
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const { apiKey, baseUrl, model } = getAiConfig();
   if (!apiKey) {
     // Fallback: naive summary (first 800 chars)
     const naive = text.slice(0, 800);
@@ -158,14 +268,14 @@ export const summarize = async (req, res) => {
   }
 
   try {
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model,
         messages: [
           { role: 'system', content: 'You are an assistant that writes concise interview summaries with bullet points: strengths, concerns, next steps.' },
           { role: 'user', content: `Transcript:\n\n${text}\n\nWrite a concise summary (max 200 words) with bullet points for: strengths, concerns, next steps.` }
@@ -173,12 +283,12 @@ export const summarize = async (req, res) => {
         temperature: 0.3,
       })
     });
-    if (!resp.ok) throw new Error(`OpenAI ${resp.status}`);
+    if (!resp.ok) throw new Error(`AI provider ${resp.status}`);
     const data = await resp.json();
     const content = data?.choices?.[0]?.message?.content || '';
     rec.summaryText = content;
     await rec.save();
-    res.json({ summaryText: content, provider: 'openai' });
+    res.json({ summaryText: content, provider: process.env.AI_API_KEY ? 'custom' : 'openai' });
   } catch (e) {
     const naive = text.slice(0, 800);
     rec.summaryText = `Summary (fallback):\n${naive}`;

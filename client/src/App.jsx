@@ -18,7 +18,8 @@ import PostJob from './pages/PostJob';
 import CandidateDashboardPage from './pages/CandidateDashboardPage';
 import VideoFeed from './pages/VideoFeed';
 import Channels from './pages/Channels';
-import Posts from './pages/Posts';
+import Posts from './pages/PostsFixed';
+import PublicProfile from './pages/PublicProfile';
 import ChatPage from './pages/ChatPage';
 import Interested from './pages/Interested';
 import LiveCallPage from './pages/LiveCallPage';
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/discover" element={<Protected><VideoFeed /></Protected>} />
             <Route path="/channels" element={<Protected><Channels /></Protected>} />
             <Route path="/posts" element={<Protected><Posts /></Protected>} />
+            <Route path="/u/:id" element={<Protected><PublicProfile /></Protected>} />
             <Route path="/profile" element={<Protected><Profile /></Protected>} />
             <Route path="/chat" element={<Protected><ChatPage /></Protected>} />
             <Route path="/interested" element={<Protected role="employer"><Interested /></Protected>} />

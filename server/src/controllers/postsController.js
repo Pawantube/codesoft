@@ -41,6 +41,26 @@ export const list = async (req, res) => {
   res.json(posts.map((p) => ({ ...p, id: String(p._id) })));
 };
 
+export const feed = async (req, res) => {
+  const { q, limit = 20, before } = req.query;
+  const filter = {};
+  if (q) filter.body = new RegExp(q, 'i');
+  if (before) filter.createdAt = { $lt: new Date(before) };
+
+  // Build authors list: followed + self
+  const me = req.user?._id;
+  const following = Array.isArray(req.user?.following) ? req.user.following : [];
+  const authors = [...new Set([...(following || []).map((x)=>x), me].filter(Boolean))];
+  if (authors.length) filter.author = { $in: authors };
+
+  const posts = await Post.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(Math.min(Number(limit) || 20, 50))
+    .populate({ path: 'author', select: 'name avatarUrl role headline companyName' })
+    .lean();
+  res.json(posts.map((p) => ({ ...p, id: String(p._id) })));
+};
+
 export const create = async (req, res) => {
   const { body, tags, visibility = 'public', company } = req.body || {};
   if (!body || !body.trim()) return res.status(400).json({ error: 'Post body is required' });

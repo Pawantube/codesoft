@@ -71,6 +71,11 @@ export const updateMe = async (req, res) => {
   const updates = {};
   for (const key of allowed) if (key in req.body) updates[key] = req.body[key];
 
+  // Drop empty-string values to avoid unintentionally clearing persisted fields
+  for (const k of Object.keys(updates)) {
+    if (typeof updates[k] === 'string' && updates[k].trim() === '') delete updates[k];
+  }
+
   if ('skills' in updates) updates.skills = parseList(updates.skills);
   if ('interests' in updates) updates.interests = parseList(updates.interests);
   if ('videoTags' in updates) updates.videoTags = parseList(updates.videoTags);

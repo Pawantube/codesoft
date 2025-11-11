@@ -43,6 +43,10 @@ const userSchema = new mongoose.Schema({
   links: linkSchema,
   resumeUrl: String,
 
+  // social graph
+  following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true }],
+  followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true }],
+
   // video introduction
   videoUrl: String,
   videoThumbnailUrl: String,

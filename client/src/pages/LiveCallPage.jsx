@@ -4,7 +4,13 @@ import { getSocket, initSocket } from '../utils/socket';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
 import { showToast } from '../utils/toast';
-import Editor from '@monaco-editor/react';
+import TabBar from '../components/livecall/TabBar';
+import ScorecardPane from '../components/livecall/ScorecardPane';
+import CallHeader from '../components/livecall/CallHeader';
+import VideoPane from '../components/livecall/VideoPane';
+import CodePane from '../components/livecall/CodePane';
+import WhiteboardPane from '../components/livecall/WhiteboardPane';
+import NotesPane from '../components/livecall/NotesPane';
 
 // Inline client-side defaults (PUBLIC values only)
 // Do NOT place server secrets in the client.
@@ -38,6 +44,10 @@ export default function LiveCallPage() {
   const [summaryText, setSummaryText] = useState('');
   const [savingTranscript, setSavingTranscript] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  const [questions, setQuestions] = useState([]); // [{id,text,weight,category}]
+  const [scorecard, setScorecard] = useState(null); // {overallScore, summary, criteria[]}
+  const [savingQuestions, setSavingQuestions] = useState(false);
+  const [scoring, setScoring] = useState(false);
   const [transcriptSavedAt, setTranscriptSavedAt] = useState(null);
   const [calendarMeta, setCalendarMeta] = useState(null);
   const [recording, setRecording] = useState(false);
@@ -130,7 +140,27 @@ export default function LiveCallPage() {
       const fd = new FormData();
       fd.append('audio', blob, filename);
       const res = await api.post(`/interview/${applicationId}/transcribe`, fd);
-      if (res?.data?.transcriptText) setTranscriptText(res.data.transcriptText);
+      const updated = res?.data?.transcriptText || '';
+      if (updated) setTranscriptText(updated);
+      // Auto-trigger summary + scorecard if transcript is long enough
+      try {
+        const MIN_LEN = 400; // characters
+        if ((updated || '').length >= MIN_LEN) {
+          // summarize
+          setSummarizing(true);
+          const sres = await api.post(`/interview/${applicationId}/summarize`);
+          if (sres?.data?.summaryText) setSummaryText(sres.data.summaryText);
+          setSummarizing(false);
+          // scorecard
+          setScoring(true);
+          const cres = await api.post(`/interview/${applicationId}/scorecard`, {});
+          if (cres?.data?.scorecard) setScorecard(cres.data.scorecard);
+          setScoring(false);
+        }
+      } catch {
+        setSummarizing(false);
+        setScoring(false);
+      }
     } catch (e) {
       showToast({ title: 'Transcription failed', message: e?.response?.data?.error || 'Please try again.' });
     } finally {
@@ -306,7 +336,7 @@ export default function LiveCallPage() {
   useEffect(() => {
     if (tab === 'code') { ensureSession(); }
     if (tab === 'whiteboard') { ensureSession().then(() => loadWhiteboardSnapshot()); }
-    if (tab === 'notes') { loadInterviewRecord(); }
+    if (tab === 'notes' || tab === 'scorecard') { loadInterviewRecord(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -318,6 +348,8 @@ export default function LiveCallPage() {
       setNotes(Array.isArray(data.notes) ? data.notes : []);
       setTranscriptText(data.transcriptText || '');
       setSummaryText(data.summaryText || '');
+      setQuestions(Array.isArray(data.questions) ? data.questions : []);
+      setScorecard(data.scorecard || null);
     } catch {}
   };
   const addNote = async () => {
@@ -668,189 +700,92 @@ export default function LiveCallPage() {
 
   return (
     <div className="w-full h-full flex flex-col p-2 sm:p-3 gap-3">
-      <div className="rounded-xl border bg-white p-3 shrink-0">
-        <div className="flex flex-wrap items-center gap-2 justify-between">
-          <div className="text-sm">
-            <div className="font-semibold">Live Call</div>
-            <div className="text-gray-500">Application ID: {applicationId}</div>
-            <div className="text-[11px] text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
-              <span>Socket: <span className="font-mono">{socketId||'...'}</span></span>
-              <span>Leader: <span className="font-mono">{isLeader? 'true':'false'}</span></span>
-              <span>ICE: <span className="font-mono">{iceSource||'...'}</span></span>
-              <span>API: <span className="font-mono">{String(CLIENT_ENV.VITE_API_URL||'')}</span></span>
-              <span>ENABLE_METERED: <span className="font-mono">{String(CLIENT_ENV.VITE_ENABLE_METERED||'')}</span></span>
-              <span>SUBDOMAIN: <span className="font-mono">{String(CLIENT_ENV.VITE_METERED_SUBDOMAIN||'')}</span></span>
-            </div>
-            {error && <div className="text-red-600">{error}</div>}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border px-2 py-0.5 text-xs text-gray-700 bg-gray-50">Participants: {participantsCount}</span>
-            {!ready ? (
-              <button onClick={() => joinRef.current?.()} disabled={joining} className="rounded bg-purple-600 px-3 py-1 text-sm text-white disabled:opacity-50">
-                {joining ? 'Joining…' : 'Join Call'}
-              </button>
-            ) : (
-              <>
-                <button onClick={toggleMute} className="rounded border px-3 py-1 text-sm">{muted ? 'Unmute' : 'Mute'}</button>
-                <button onClick={toggleCamera} className="rounded border px-3 py-1 text-sm">{cameraOff ? 'Camera On' : 'Camera Off'}</button>
-                <button onClick={shareScreen} className="rounded border px-3 py-1 text-sm">Share screen</button>
-                <button onClick={()=>addTimestampedNote()} className="rounded border px-3 py-1 text-sm">Add timestamp</button>
-                <button onClick={leave} className="rounded bg-red-600 px-3 py-1 text-sm text-white">Leave</button>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="mt-3 flex items-center gap-2 text-sm overflow-x-auto no-scrollbar">
-          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='video'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('video')}>Video</button>
-          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='code'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('code')}>Code</button>
-          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='whiteboard'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('whiteboard')}>Whiteboard</button>
-          <button className={`px-3 py-1 rounded whitespace-nowrap ${tab==='notes'?'bg-gray-900 text-white':'border text-gray-800'}`} onClick={()=>setTab('notes')}>Notes</button>
-          {/* Calendar */}
-          <a
-            href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000')}/api/interview/${applicationId}/ics`}
-            className="ml-auto px-3 py-1 rounded border bg-white text-gray-900"
-          >
-            Download ICS
-          </a>
-          {googleUrl && (
-            <a href={googleUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border bg-white text-gray-900">Google</a>
-          )}
-          {outlookUrl && (
-            <a href={outlookUrl} target="_blank" rel="noreferrer" className="px-3 py-1 rounded border bg-white text-gray-900">Outlook</a>
-          )}
-        </div>
-      </div>
+      <CallHeader
+        applicationId={applicationId}
+        socketId={socketId}
+        isLeader={isLeader}
+        iceSource={iceSource}
+        apiUrl={CLIENT_ENV.VITE_API_URL}
+        enableMetered={CLIENT_ENV.VITE_ENABLE_METERED}
+        meteredSubdomain={CLIENT_ENV.VITE_METERED_SUBDOMAIN}
+        error={error}
+        ready={ready}
+        joining={joining}
+        onJoin={() => joinRef.current?.()}
+        onLeave={leave}
+        onToggleMute={toggleMute}
+        onToggleCamera={toggleCamera}
+        onShareScreen={shareScreen}
+        onAddTimestampedNote={() => addTimestampedNote()}
+        muted={muted}
+        cameraOff={cameraOff}
+        participantsCount={participantsCount}
+      />
+
+      {tab === 'scorecard' && (
+        <ScorecardPane
+          applicationId={applicationId}
+          questions={questions}
+          setQuestions={setQuestions}
+          scorecard={scorecard}
+          setScorecard={setScorecard}
+          summaryText={summaryText}
+          setSummaryText={setSummaryText}
+          savingQuestions={savingQuestions}
+          setSavingQuestions={setSavingQuestions}
+          summarizing={summarizing}
+          setSummarizing={setSummarizing}
+          scoring={scoring}
+          setScoring={setScoring}
+        />
+      )}
+      <TabBar tab={tab} setTab={setTab} applicationId={applicationId} googleUrl={googleUrl} outlookUrl={outlookUrl} />
 
       {tab === 'video' && (
-        <div className="grid gap-3 md:grid-cols-2 flex-1 min-h-0">
-          <div className="w-full aspect-video md:h-full">
-            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full rounded-lg border bg-black object-cover" />
-          </div>
-          <div className="w-full aspect-video md:h-full">
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full rounded-lg border bg-black object-cover" />
-          </div>
-        </div>
+        <VideoPane localVideoRef={localVideoRef} remoteVideoRef={remoteVideoRef} />
       )}
 
       {tab === 'code' && (
-        <div className="rounded-xl border bg-white p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs text-gray-600">Shared editor (synced + persisted)</div>
-            {!sessionId && <button onClick={ensureSession} className="text-xs underline">Init session</button>}
-          </div>
-          <div className="min-h-[360px]">
-            <Editor
-              height="420px"
-              defaultLanguage="javascript"
-              theme="vs-dark"
-              value={code}
-              onChange={(v)=>emitCode(v ?? '')}
-              options={{ fontSize: 13, minimap: { enabled: false } }}
-            />
-          </div>
-        </div>
+        <CodePane code={code} onChange={emitCode} sessionId={sessionId} ensureSession={ensureSession} />
       )}
 
       {tab === 'whiteboard' && (
-        <div className="rounded-xl border bg-white p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs text-gray-600">Collaborative whiteboard (synced + persisted)</div>
-            <button className="px-2 py-1 border rounded text-sm" onClick={onClearBoard}>Clear</button>
-          </div>
-          <div className="w-full">
-            <canvas
-              ref={canvasRef}
-              width={960}
-              height={540}
-              onMouseDown={onCanvasDown}
-              onMouseMove={onCanvasMove}
-              onMouseUp={onCanvasUp}
-              onMouseLeave={onCanvasUp}
-              className="w-full rounded border bg-white"
-            />
-          </div>
-        </div>
+        <WhiteboardPane
+          canvasRef={canvasRef}
+          onClearBoard={onClearBoard}
+          onCanvasDown={onCanvasDown}
+          onCanvasMove={onCanvasMove}
+          onCanvasUp={onCanvasUp}
+        />
       )}
 
       {tab === 'notes' && (
-        <div className="rounded-xl border bg-white p-3 space-y-3 text-gray-900">
-          <div className="grid md:grid-cols-2 gap-3">
-            <div>
-              <div className="font-semibold text-sm mb-1">Notes</div>
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <input className="flex-1 border rounded px-2 py-1 text-sm" placeholder="Write a quick note" value={noteText} onChange={(e)=>setNoteText(e.target.value)} />
-                  <select value={noteTag} onChange={(e)=>setNoteTag(e.target.value)} className="border rounded px-2 py-1 text-xs">
-                    <option value="general">General</option>
-                    <option value="strength">Strength</option>
-                    <option value="concern">Concern</option>
-                    <option value="next_step">Next step</option>
-                  </select>
-                  <button onClick={addNote} className="px-3 py-1 rounded bg-gray-900 text-white text-sm">Add</button>
-                </div>
-                <div className="flex items-center justify-between text-xs text-gray-600">
-                  <div className="flex items-center gap-2">
-                    <span>Filter:</span>
-                    <select value={noteFilter} onChange={(e)=>setNoteFilter(e.target.value)} className="border rounded px-2 py-1">
-                      <option value="all">All</option>
-                      <option value="general">General</option>
-                      <option value="strength">Strength</option>
-                      <option value="concern">Concern</option>
-                      <option value="next_step">Next step</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className="underline" onClick={()=>copyToClipboard('Notes', (notes||[]).map(n=>`[${n.tag||'general'}] ${n.text}`).join('\n'))}>Copy</button>
-                    <button className="underline" onClick={()=>downloadText(`notes-${applicationId}.txt`, (notes||[]).map(n=>`[${n.tag||'general'}] ${n.text}`).join('\n'))}>Export</button>
-                  </div>
-                </div>
-                <div className="border rounded p-2 max-h-72 overflow-auto text-sm">
-                  {notes.filter(n=>noteFilter==='all' || n.tag===noteFilter).length === 0 && <div className="text-gray-500">No notes yet.</div>}
-                  {notes.filter(n=>noteFilter==='all' || n.tag===noteFilter).map((n, idx) => (
-                    <div key={idx} className="border-b py-1 last:border-b-0">
-                      <div className="flex items-center justify-between">
-                        <div><span className="text-[10px] uppercase tracking-wide text-gray-400 mr-2">{(n.tag||'general').replace('_',' ')}</span>{n.text}</div>
-                        <div className="text-[11px] text-gray-500">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-2 flex items-center gap-2 text-xs">
-                  {!recording ? (
-                    <button onClick={startRecording} className="px-3 py-1 rounded border">Record</button>
-                  ) : (
-                    <button onClick={stopRecording} className="px-3 py-1 rounded bg-red-600 text-white">Stop</button>
-                  )}
-                  <label className="px-2 py-1 border rounded cursor-pointer">
-                    Upload audio
-                    <input type="file" accept="audio/*,video/webm" className="hidden" onChange={onAudioFilePick} />
-                  </label>
-                  {uploadingAudio && <span>Uploading…</span>}
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="font-semibold text-sm mb-1">Transcript</div>
-              <textarea className="w-full min-h-[160px] border rounded p-2 text-sm" value={transcriptText} onChange={(e)=>setTranscriptText(e.target.value)} placeholder="Paste the transcript here (or use your call recorder and paste results)…" />
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button disabled={savingTranscript} onClick={saveTranscript} className="px-3 py-1 rounded border text-sm disabled:opacity-50">{savingTranscript? 'Saving…':'Save Transcript'}</button>
-                <button disabled={summarizing} onClick={summarizeTranscript} className="px-3 py-1 rounded bg-purple-600 text-white text-sm disabled:opacity-50">{summarizing? 'Summarizing…':'Summarize'}</button>
-                <button className="px-3 py-1 rounded border text-sm" onClick={()=>copyToClipboard('Transcript', transcriptText)}>Copy</button>
-                <button className="px-3 py-1 rounded border text-sm" onClick={()=>downloadText(`transcript-${applicationId}.txt`, transcriptText)}>Export</button>
-                {transcriptSavedAt && <span className="text-xs text-gray-500">Saved {new Date(transcriptSavedAt).toLocaleTimeString()}</span>}
-              </div>
-              <div className="mt-3">
-                <div className="font-semibold text-sm mb-1">AI Summary</div>
-                <div className="text-sm whitespace-pre-wrap border rounded p-2 min-h-[80px]">{summaryText || '—'}</div>
-                <div className="mt-2 flex gap-2 text-sm">
-                  <button className="px-3 py-1 rounded border" onClick={()=>copyToClipboard('Summary', summaryText)}>Copy</button>
-                  <button className="px-3 py-1 rounded border" onClick={()=>downloadText(`summary-${applicationId}.txt`, summaryText)}>Export</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <NotesPane
+          applicationId={applicationId}
+          notes={notes}
+          noteText={noteText}
+          setNoteText={setNoteText}
+          noteTag={noteTag}
+          setNoteTag={setNoteTag}
+          noteFilter={noteFilter}
+          setNoteFilter={setNoteFilter}
+          addNote={addNote}
+          copyToClipboard={copyToClipboard}
+          downloadText={downloadText}
+          recording={recording}
+          startRecording={startRecording}
+          stopRecording={stopRecording}
+          onAudioFilePick={onAudioFilePick}
+          uploadingAudio={uploadingAudio}
+          transcriptText={transcriptText}
+          setTranscriptText={setTranscriptText}
+          saveTranscript={saveTranscript}
+          savingTranscript={savingTranscript}
+          summarizeTranscript={summarizeTranscript}
+          summarizing={summarizing}
+          transcriptSavedAt={transcriptSavedAt}
+          summaryText={summaryText}
+        />
       )}
     </div>
   );

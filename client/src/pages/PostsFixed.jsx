@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { fileUrl } from '../utils/fileUrl';
@@ -22,6 +23,7 @@ export default function Posts() {
   const [error, setError] = useState('');
   const [modWarning, setModWarning] = useState(null); // { reasons:[], categories:[] }
   const [q, setQ] = useState('');
+  const [mode, setMode] = useState('all'); // 'all' | 'following'
   const [commentsOpen, setCommentsOpen] = useState({}); // id -> bool
   const [comments, setComments] = useState({}); // id -> list
   const [commentText, setCommentText] = useState({}); // id -> text
@@ -32,7 +34,8 @@ export default function Posts() {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (opts.before) params.set('before', opts.before);
-      const res = await api.get(`/posts?${params.toString()}`);
+      const path = mode === 'following' ? '/posts/feed' : '/posts';
+      const res = await api.get(`${path}?${params.toString()}`);
       setPosts(res.data || []);
     } catch (e) {
       setError(e?.response?.data?.error || 'Unable to load posts');
@@ -64,7 +67,7 @@ export default function Posts() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mode]);
 
   const submit = async () => {
     const text = body.trim();
@@ -156,7 +159,12 @@ export default function Posts() {
 
       <div className="rounded-xl border bg-white p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Feed</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">Feed</h2>
+            <span className="ml-3 text-xs text-gray-600">View:</span>
+            <button onClick={()=>setMode('all')} className={`text-xs rounded px-2 py-1 border ${mode==='all'?'bg-gray-900 text-white':'bg-white'}`}>All</button>
+            <button onClick={()=>setMode('following')} className={`text-xs rounded px-2 py-1 border ${mode==='following'?'bg-gray-900 text-white':'bg-white'}`}>Following</button>
+          </div>
           <div className="flex items-center gap-2">
             <input
               value={q}
@@ -173,8 +181,23 @@ export default function Posts() {
             return (
               <div key={id} className="rounded-lg border">
                 <div className="p-3">
-                  <div className="text-sm font-semibold">{p.author?.name}</div>
-                  <div className="mt-1 text-sm whitespace-pre-wrap">{p.body}</div>
+                  <div className="flex items-start gap-2">
+                    <Link to={`/u/${p.author?._id || p.author?.id || ''}`} className="shrink-0">
+                      <img
+                        src={(p.author?.avatarUrl ? (/^https?:\/\//i.test(p.author.avatarUrl) ? p.author.avatarUrl : fileUrl(p.author.avatarUrl)) : FALLBACK_AVATAR)}
+                        alt=""
+                        className="h-8 w-8 rounded-full object-cover border"
+                        onError={(e)=>{ if (e.currentTarget.src !== FALLBACK_AVATAR) e.currentTarget.src = FALLBACK_AVATAR; }}
+                      />
+                    </Link>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold">
+                        <Link to={`/u/${p.author?._id || p.author?.id || ''}`} className="hover:underline">{p.author?.name}</Link>
+                      </div>
+                      {p.author?.headline && <div className="text-xs text-gray-500">{p.author.headline}</div>}
+                      <div className="mt-1 text-sm whitespace-pre-wrap">{p.body}</div>
+                    </div>
+                  </div>
                 </div>
                 {p.mediaUrl && (
                   <div className="bg-black">
@@ -189,7 +212,11 @@ export default function Posts() {
                   <button onClick={() => like(id)} className="underline">Like</button>
                   <span>{Array.isArray(p.likes) ? p.likes.length : 0} likes</span>
                   <button onClick={() => loadComments(id)} className="underline">Comments ({p.commentsCount || (comments[id]?.length||0)})</button>
-                  <button onClick={() => remove(id)} className="ml-auto text-red-600 underline">Delete</button>
+                  {(user && (String(p.author?._id||p.author?.id) === String(user?._id))) ? (
+                    <button onClick={() => remove(id)} className="ml-auto text-red-600 underline">Delete</button>
+                  ) : (
+                    <Link to={`/u/${p.author?._id || p.author?.id || ''}`} className="ml-auto underline">View profile</Link>
+                  )}
                 </div>
                 {commentsOpen[id] && (
                   <div className="border-t p-3 space-y-3 text-sm">
